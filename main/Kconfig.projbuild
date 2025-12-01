@@ -1,0 +1,31 @@
+menu "MagnoliaOS Configuration"
+    config MAGNOLIA_KERNEL_ROOT_PROC_PRIO
+        int "Root process priority"
+        range 4 32
+        default 8
+        help
+            Приоритет корневого процесса в системе.
+
+    config MAGNOLIA_IPC_SELFTESTS
+        bool "Run Magnolia IPC self-tests at boot"
+        default n
+        help
+            Execute Magnolia IPC unit tests during boot to verify basic
+            behavior. Disable for production builds unless regression checks
+            are required.
+
+    config MAGNOLIA_SCHED_SELFTESTS
+        bool "Run Magnolia scheduler self-tests at boot"
+        default n
+        help
+            Execute Magnolia scheduler unit tests during boot for early
+            validation of the SAL layer.
+
+    config MAGNOLIA_JOB_SELFTESTS
+        bool "Run Magnolia job subsystem self-tests at boot"
+        default n
+        help
+            Execute Magnolia job queue unit tests during boot to verify job
+            submission, queue-full handling, and shutdown semantics.
+
+endmenu

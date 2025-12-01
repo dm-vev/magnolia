@@ -1,0 +1,5 @@
+# Name,     Type, SubType, Offset,    Size,     Flags
+nvs,        data, nvs,     0xb000,    0x5000,
+otadata,    data, ota,     0x10000,   0x2000,
+app0,       app,  factory, 0x20000,   0x100000,
+rootfs,     data, littlefs,     0x220000,  0x400000,
