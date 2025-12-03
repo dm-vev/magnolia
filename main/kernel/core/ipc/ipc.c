@@ -1,13 +1,7 @@
 #include "kernel/core/ipc/ipc_channel.h"
-/*
- * Magnolia OS — IPC Subsystem
- * Purpose:
- *     Entry-point that initializes the IPC primitives.
- *
- * © 2025 Magnolia Project
- */
-
 #include "kernel/core/ipc/ipc.h"
+
+#if CONFIG_MAGNOLIA_IPC_ENABLED
 
 void ipc_init(void)
 {
@@ -17,3 +11,11 @@ void ipc_init(void)
     m_ipc_channel_module_init();
     ipc_shm_module_init();
 }
+
+#else
+
+void ipc_init(void)
+{
+}
+
+#endif

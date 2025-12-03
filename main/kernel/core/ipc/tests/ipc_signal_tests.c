@@ -9,7 +9,7 @@
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 
-#ifdef CONFIG_MAGNOLIA_IPC_SELFTESTS
+#if CONFIG_MAGNOLIA_IPC_ENABLED && CONFIG_MAGNOLIA_IPC_SELFTESTS
 
 #include "esp_log.h"
 #include "freertos/semphr.h"
@@ -281,4 +281,4 @@ void ipc_selftests_run(void)
 {
 }
 
-#endif /* CONFIG_MAGNOLIA_IPC_SELFTESTS */
+#endif /* CONFIG_MAGNOLIA_IPC_ENABLED && CONFIG_MAGNOLIA_IPC_SELFTESTS */

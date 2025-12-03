@@ -16,10 +16,12 @@
 #include "kernel/core/ipc/ipc_scheduler_bridge.h"
 #include "kernel/core/ipc/ipc_shm_private.h"
 
+#if CONFIG_MAGNOLIA_IPC_SHM_ENABLED
+
 static ipc_shm_region_t g_shm_regions[IPC_MAX_SHM_REGIONS];
 static const ipc_shm_region_options_t g_ipc_shm_default_options = {
     .ring_policy = IPC_SHM_RING_OVERWRITE_BLOCK,
-    .packet_max_payload = 0,
+    .packet_max_payload = CONFIG_MAGNOLIA_IPC_SHM_DEFAULT_PACKET_PAYLOAD,
 };
 
 void ipc_shm_module_init(void)
@@ -30,6 +32,139 @@ void ipc_shm_module_init(void)
     }
 }
 
+#else
+
+void ipc_shm_module_init(void)
+{
+}
+
+static inline ipc_error_t ipc_shm_not_supported(void)
+{
+    return IPC_ERR_NOT_SUPPORTED;
+}
+
+ipc_error_t ipc_shm_create(size_t size,
+                           ipc_shm_mode_t mode,
+                           const ipc_shm_region_options_t *options,
+                           ipc_handle_t *out_handle)
+{
+    (void)size;
+    (void)mode;
+    (void)options;
+    (void)out_handle;
+    return ipc_shm_not_supported();
+}
+
+ipc_error_t ipc_shm_destroy(ipc_handle_t handle)
+{
+    (void)handle;
+    return ipc_shm_not_supported();
+}
+
+ipc_error_t ipc_shm_attach(ipc_handle_t handle,
+                          ipc_shm_access_mode_t access,
+                          const ipc_shm_attachment_options_t *options,
+                          ipc_shm_attachment_t *out_attachment)
+{
+    (void)handle;
+    (void)access;
+    (void)options;
+    (void)out_attachment;
+    return ipc_shm_not_supported();
+}
+
+ipc_error_t ipc_shm_detach(ipc_shm_attachment_t *attachment)
+{
+    (void)attachment;
+    return ipc_shm_not_supported();
+}
+
+ipc_error_t ipc_shm_read(ipc_shm_attachment_t *attachment,
+                        void *dest,
+                        size_t length,
+                        uint64_t timeout_us)
+{
+    (void)attachment;
+    (void)dest;
+    (void)length;
+    (void)timeout_us;
+    return ipc_shm_not_supported();
+}
+
+ipc_error_t ipc_shm_write(ipc_shm_attachment_t *attachment,
+                         const void *data,
+                         size_t length,
+                         uint64_t timeout_us)
+{
+    (void)attachment;
+    (void)data;
+    (void)length;
+    (void)timeout_us;
+    return ipc_shm_not_supported();
+}
+
+ipc_error_t ipc_shm_read_timed(ipc_shm_attachment_t *attachment,
+                               void *dest,
+                               size_t length,
+                               uint64_t timeout_us)
+{
+    (void)attachment;
+    (void)dest;
+    (void)length;
+    (void)timeout_us;
+    return ipc_shm_not_supported();
+}
+
+ipc_error_t ipc_shm_write_timed(ipc_shm_attachment_t *attachment,
+                                const void *data,
+                                size_t length,
+                                uint64_t timeout_us)
+{
+    (void)attachment;
+    (void)data;
+    (void)length;
+    (void)timeout_us;
+    return ipc_shm_not_supported();
+}
+
+ipc_error_t ipc_shm_try_read(ipc_shm_attachment_t *attachment,
+                            void *dest,
+                            size_t length)
+{
+    (void)attachment;
+    (void)dest;
+    (void)length;
+    return ipc_shm_not_supported();
+}
+
+ipc_error_t ipc_shm_try_write(ipc_shm_attachment_t *attachment,
+                             const void *data,
+                             size_t length)
+{
+    (void)attachment;
+    (void)data;
+    (void)length;
+    return ipc_shm_not_supported();
+}
+
+ipc_error_t ipc_shm_control(ipc_handle_t handle,
+                            ipc_shm_control_command_t cmd,
+                            void *arg)
+{
+    (void)handle;
+    (void)cmd;
+    (void)arg;
+    return IPC_ERR_NOT_SUPPORTED;
+}
+
+ipc_error_t ipc_shm_query(ipc_handle_t handle, ipc_shm_info_t *info)
+{
+    (void)handle;
+    (void)info;
+    return ipc_shm_not_supported();
+}
+
+#endif
 ipc_shm_region_t *ipc_shm_lookup(ipc_handle_t handle)
 {
     ipc_object_type_t type;
@@ -119,6 +254,10 @@ ipc_error_t ipc_shm_create(size_t size,
                            const ipc_shm_region_options_t *options,
                            ipc_handle_t *out_handle)
 {
+    if (size == 0) {
+        size = CONFIG_MAGNOLIA_IPC_SHM_DEFAULT_REGION_SIZE;
+    }
+
     if (size == 0 || out_handle == NULL) {
         return IPC_ERR_INVALID_ARGUMENT;
     }
@@ -127,9 +266,22 @@ ipc_error_t ipc_shm_create(size_t size,
         return IPC_ERR_INVALID_ARGUMENT;
     }
 
-    if (mode == IPC_SHM_MODE_PACKET_BUFFER && size <= sizeof(ipc_shm_packet_header_t)) {
+    if (mode == IPC_SHM_MODE_PACKET_BUFFER
+        && size <= sizeof(ipc_shm_packet_header_t)) {
         return IPC_ERR_INVALID_ARGUMENT;
     }
+
+#if !CONFIG_MAGNOLIA_IPC_SHM_ALLOW_RING_BUFFER
+    if (mode == IPC_SHM_MODE_RING_BUFFER) {
+        return IPC_ERR_NOT_SUPPORTED;
+    }
+#endif
+
+#if !CONFIG_MAGNOLIA_IPC_SHM_ALLOW_PACKET_BUFFER
+    if (mode == IPC_SHM_MODE_PACKET_BUFFER) {
+        return IPC_ERR_NOT_SUPPORTED;
+    }
+#endif
 
     ipc_handle_registry_t *registry = ipc_core_shm_registry();
     uint16_t index = 0;

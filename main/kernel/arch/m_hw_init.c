@@ -8,6 +8,7 @@
 #include "kernel/core/sched/tests/m_sched_tests.h"
 #include "kernel/core/sched/m_sched.h"
 #include "kernel/core/timer/m_timer.h"
+#include "kernel/core/timer/tests/m_timer_tests.h"
 
 void magnolia_hw_init(void)
 {
@@ -19,7 +20,11 @@ void magnolia_hw_init(void)
     m_sched_selftests_run();
 #endif
 
-#ifdef CONFIG_MAGNOLIA_IPC_SELFTESTS
+#ifdef CONFIG_MAGNOLIA_TIMER_SELFTESTS
+    m_timer_selftests_run();
+#endif
+
+#if CONFIG_MAGNOLIA_IPC_ENABLED && CONFIG_MAGNOLIA_IPC_SELFTESTS
     ipc_selftests_run();
 #endif
 

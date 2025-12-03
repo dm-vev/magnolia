@@ -355,6 +355,7 @@ m_job_queue_t *m_job_queue_create(const m_job_queue_config_t *config)
             .stack_depth = config->stack_depth,
             .priority = config->priority,
             .tag = "job_worker",
+            .creation_flags = M_SCHED_TASK_FLAG_WORKER,
             .user_data = queue,
         };
         if (m_sched_task_create(&opts, &worker->task_id) != M_SCHED_OK) {

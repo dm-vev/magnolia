@@ -1,0 +1,8 @@
+menu "Magnolia Timer"
+    config MAGNOLIA_TIMER_SELFTESTS
+        bool "Run Magnolia timer self-tests at boot"
+        default n
+        help
+            Execute Magnolia timer unit tests during boot for early
+            validation of the timer connectivity stack.
+endmenu

@@ -6,7 +6,19 @@
 
 #include <string.h>
 
+#if CONFIG_MAGNOLIA_IPC_SIGNAL_DIAGNOSTIC_VERBOSITY > 0 \
+        || CONFIG_MAGNOLIA_IPC_DEBUG
+#include "esp_log.h"
+#endif
+
 #include "kernel/core/ipc/ipc_signal_private.h"
+
+#if CONFIG_MAGNOLIA_IPC_SIGNALS_ENABLED
+
+#if CONFIG_MAGNOLIA_IPC_SIGNAL_DIAGNOSTIC_VERBOSITY > 0 \
+        || CONFIG_MAGNOLIA_IPC_DEBUG
+static const char *IPC_SIGNAL_TAG = "ipc_signal";
+#endif
 
 static ipc_signal_t g_signals[IPC_MAX_SIGNALS];
 
@@ -51,6 +63,7 @@ void ipc_signal_module_init(void)
     memset(g_signals, 0, sizeof(g_signals));
     for (size_t i = 0; i < IPC_MAX_SIGNALS; i++) {
         g_signals[i].header.lock = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
+        g_signals[i].waitset_listeners = 0;
     }
 }
 
@@ -68,6 +81,7 @@ static bool ipc_signal_is_ready(const ipc_signal_t *signal)
 /**
  * @brief   Notify all waitset listeners about readiness changes.
  */
+#if CONFIG_MAGNOLIA_IPC_WAITSET_ENABLED
 static void ipc_signal_notify_waitsets(ipc_signal_t *signal, bool ready)
 {
     ipc_waitset_listener_t *iter = signal->listeners;
@@ -86,6 +100,13 @@ static void ipc_signal_notify_waitsets(ipc_signal_t *signal, bool ready)
         iter = next;
     }
 }
+#else
+static void ipc_signal_notify_waitsets(ipc_signal_t *signal, bool ready)
+{
+    (void)signal;
+    (void)ready;
+}
+#endif
 
 /**
  * @brief   Update cached ready state and dispatch waitset notifications while locked.
@@ -260,6 +281,8 @@ ipc_error_t ipc_signal_destroy(ipc_handle_t handle)
     ipc_wake_all(&signal->waiters, IPC_WAIT_RESULT_OBJECT_DESTROYED);
     signal->header.waiting_tasks = 0;
     ipc_signal_notify_waitsets(signal, false);
+    signal->listeners = NULL;
+    signal->waitset_listeners = 0;
     ipc_wait_queue_init(&signal->waiters);
     portEXIT_CRITICAL(&signal->header.lock);
 
@@ -307,6 +330,15 @@ ipc_error_t ipc_signal_set(ipc_handle_t handle)
     }
 
     portEXIT_CRITICAL(&signal->header.lock);
+
+#if CONFIG_MAGNOLIA_IPC_SIGNAL_DIAGNOSTIC_VERBOSITY > 0 \
+        || CONFIG_MAGNOLIA_IPC_DEBUG
+    ESP_LOGD(IPC_SIGNAL_TAG,
+             "set handle=%u ready=%u counter=%u",
+             (unsigned)(signal->header.handle & IPC_HANDLE_INDEX_MASK),
+             (unsigned)signal->ready_state,
+             (unsigned)signal->counter);
+#endif
     return IPC_OK;
 }
 
@@ -506,6 +538,7 @@ ipc_error_t ipc_signal_waitset_subscribe(ipc_handle_t handle,
                                          ipc_waitset_listener_t *listener,
                                          ipc_waitset_ready_cb_t callback,
                                          void *user_data)
+#if CONFIG_MAGNOLIA_IPC_WAITSET_ENABLED
 {
     if (listener == NULL || callback == NULL) {
         return IPC_ERR_INVALID_ARGUMENT;
@@ -520,14 +553,30 @@ ipc_error_t ipc_signal_waitset_subscribe(ipc_handle_t handle,
     portENTER_CRITICAL(&signal->header.lock);
     listener->callback = callback;
     listener->user_data = user_data;
+
+    if (signal->waitset_listeners >= CONFIG_MAGNOLIA_IPC_WAITSET_MAX_ENTRIES) {
+        portEXIT_CRITICAL(&signal->header.lock);
+        return IPC_ERR_NO_SPACE;
+    }
+
     listener->next = signal->listeners;
     signal->listeners = listener;
+    signal->waitset_listeners++;
     bool ready = ipc_signal_is_ready(signal);
     portEXIT_CRITICAL(&signal->header.lock);
 
     callback(handle, ready, user_data);
     return IPC_OK;
 }
+#else
+{
+    (void)handle;
+    (void)listener;
+    (void)callback;
+    (void)user_data;
+    return IPC_ERR_NOT_SUPPORTED;
+}
+#endif
 
 /**
  * @brief   Remove a listener from a signal waitset subscription.
@@ -542,6 +591,7 @@ ipc_error_t ipc_signal_waitset_subscribe(ipc_handle_t handle,
  */
 ipc_error_t ipc_signal_waitset_unsubscribe(ipc_handle_t handle,
                                            ipc_waitset_listener_t *listener)
+#if CONFIG_MAGNOLIA_IPC_WAITSET_ENABLED
 {
     if (listener == NULL) {
         return IPC_ERR_INVALID_ARGUMENT;
@@ -559,6 +609,9 @@ ipc_error_t ipc_signal_waitset_unsubscribe(ipc_handle_t handle,
         if (*current == listener) {
             *current = listener->next;
             listener->next = NULL;
+            if (signal->waitset_listeners > 0) {
+                signal->waitset_listeners--;
+            }
             portEXIT_CRITICAL(&signal->header.lock);
             return IPC_OK;
         }
@@ -567,3 +620,87 @@ ipc_error_t ipc_signal_waitset_unsubscribe(ipc_handle_t handle,
     portEXIT_CRITICAL(&signal->header.lock);
     return IPC_ERR_INVALID_ARGUMENT;
 }
+#else
+{
+    (void)handle;
+    (void)listener;
+    return IPC_ERR_NOT_SUPPORTED;
+}
+#endif
+
+#else
+
+void ipc_signal_module_init(void)
+{
+}
+
+static inline ipc_error_t ipc_signal_not_supported(void)
+{
+    return IPC_ERR_NOT_SUPPORTED;
+}
+
+ipc_error_t ipc_signal_create(ipc_signal_mode_t mode, ipc_handle_t *out_handle)
+{
+    (void)mode;
+    (void)out_handle;
+    return ipc_signal_not_supported();
+}
+
+ipc_error_t ipc_signal_destroy(ipc_handle_t handle)
+{
+    (void)handle;
+    return ipc_signal_not_supported();
+}
+
+ipc_error_t ipc_signal_set(ipc_handle_t handle)
+{
+    (void)handle;
+    return ipc_signal_not_supported();
+}
+
+ipc_error_t ipc_signal_clear(ipc_handle_t handle)
+{
+    (void)handle;
+    return ipc_signal_not_supported();
+}
+
+ipc_error_t ipc_signal_try_wait(ipc_handle_t handle)
+{
+    (void)handle;
+    return ipc_signal_not_supported();
+}
+
+ipc_error_t ipc_signal_wait(ipc_handle_t handle)
+{
+    (void)handle;
+    return ipc_signal_not_supported();
+}
+
+ipc_error_t ipc_signal_timed_wait(ipc_handle_t handle, uint64_t timeout_us)
+{
+    (void)handle;
+    (void)timeout_us;
+    return ipc_signal_not_supported();
+}
+
+ipc_error_t ipc_signal_waitset_subscribe(ipc_handle_t handle,
+                                         ipc_waitset_listener_t *listener,
+                                         ipc_waitset_ready_cb_t callback,
+                                         void *user_data)
+{
+    (void)handle;
+    (void)listener;
+    (void)callback;
+    (void)user_data;
+    return IPC_ERR_NOT_SUPPORTED;
+}
+
+ipc_error_t ipc_signal_waitset_unsubscribe(ipc_handle_t handle,
+                                           ipc_waitset_listener_t *listener)
+{
+    (void)handle;
+    (void)listener;
+    return IPC_ERR_NOT_SUPPORTED;
+}
+
+#endif

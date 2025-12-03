@@ -10,7 +10,7 @@
 
 #include "freertos/FreeRTOS.h"
 
-#ifdef CONFIG_MAGNOLIA_IPC_SELFTESTS
+#if CONFIG_MAGNOLIA_IPC_ENABLED && CONFIG_MAGNOLIA_IPC_SELFTESTS
 
 #include "esp_log.h"
 #include "freertos/semphr.h"
@@ -483,4 +483,4 @@ bool ipc_channel_tests_run(void)
     return true;
 }
 
-#endif /* CONFIG_MAGNOLIA_IPC_SELFTESTS */
+#endif /* CONFIG_MAGNOLIA_IPC_ENABLED && CONFIG_MAGNOLIA_IPC_SELFTESTS */

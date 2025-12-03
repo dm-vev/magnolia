@@ -19,12 +19,12 @@ extern "C" {
 /**
  * @brief Maximum capacity a dynamically created channel can request.
  */
-#define IPC_CHANNEL_MAX_CAPACITY 8
+#define IPC_CHANNEL_MAX_CAPACITY CONFIG_MAGNOLIA_IPC_CHANNEL_CAPACITY_MAX
 
 /**
  * @brief Maximum message size for each slot stored in a channel.
  */
-#define IPC_CHANNEL_MAX_MESSAGE_SIZE 64
+#define IPC_CHANNEL_MAX_MESSAGE_SIZE CONFIG_MAGNOLIA_IPC_CHANNEL_MAX_MESSAGE_SIZE
 
 /**
  * @brief Initialize the IPC channel subsystem.

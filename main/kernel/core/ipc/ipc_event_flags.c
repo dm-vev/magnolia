@@ -9,6 +9,8 @@
 
 #include "kernel/core/ipc/ipc_event_flags_private.h"
 
+#if CONFIG_MAGNOLIA_IPC_EVENT_FLAGS_ENABLED
+
 static ipc_event_flags_t g_event_flags[IPC_MAX_EVENT_FLAGS];
 
 /**
@@ -46,6 +48,7 @@ void ipc_event_flags_module_init(void)
     memset(g_event_flags, 0, sizeof(g_event_flags));
     for (size_t i = 0; i < IPC_MAX_EVENT_FLAGS; i++) {
         g_event_flags[i].header.lock = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
+        g_event_flags[i].waitset_listeners = 0;
     }
 }
 
@@ -62,6 +65,7 @@ static bool ipc_event_flags_is_ready(const ipc_event_flags_t *event_flags)
  */
 static void ipc_event_flags_notify_waitsets(ipc_event_flags_t *event_flags,
                                             bool ready)
+#if CONFIG_MAGNOLIA_IPC_WAITSET_ENABLED
 {
     ipc_waitset_listener_t *iter = event_flags->listeners;
 
@@ -79,6 +83,12 @@ static void ipc_event_flags_notify_waitsets(ipc_event_flags_t *event_flags,
         iter = next;
     }
 }
+#else
+{
+    (void)event_flags;
+    (void)ready;
+}
+#endif
 
 /**
  * @brief Update the ready/not ready flag while holding the lock.
@@ -541,6 +551,7 @@ ipc_error_t ipc_event_flags_waitset_subscribe(ipc_handle_t handle,
                                               ipc_waitset_listener_t *listener,
                                               ipc_waitset_ready_cb_t callback,
                                               void *user_data)
+#if CONFIG_MAGNOLIA_IPC_WAITSET_ENABLED
 {
     if (listener == NULL || callback == NULL) {
         return IPC_ERR_INVALID_ARGUMENT;
@@ -555,8 +566,15 @@ ipc_error_t ipc_event_flags_waitset_subscribe(ipc_handle_t handle,
     portENTER_CRITICAL(&event_flags->header.lock);
     listener->callback = callback;
     listener->user_data = user_data;
+
+    if (event_flags->waitset_listeners >= CONFIG_MAGNOLIA_IPC_WAITSET_MAX_ENTRIES) {
+        portEXIT_CRITICAL(&event_flags->header.lock);
+        return IPC_ERR_NO_SPACE;
+    }
+
     listener->next = event_flags->listeners;
     event_flags->listeners = listener;
+    event_flags->waitset_listeners++;
     bool ready = ipc_event_flags_is_ready(event_flags);
     portEXIT_CRITICAL(&event_flags->header.lock);
 
@@ -564,9 +582,19 @@ ipc_error_t ipc_event_flags_waitset_subscribe(ipc_handle_t handle,
 
     return IPC_OK;
 }
+#else
+{
+    (void)handle;
+    (void)listener;
+    (void)callback;
+    (void)user_data;
+    return IPC_ERR_NOT_SUPPORTED;
+}
+#endif
 
 ipc_error_t ipc_event_flags_waitset_unsubscribe(ipc_handle_t handle,
                                                 ipc_waitset_listener_t *listener)
+#if CONFIG_MAGNOLIA_IPC_WAITSET_ENABLED
 {
     if (listener == NULL) {
         return IPC_ERR_INVALID_ARGUMENT;
@@ -583,6 +611,10 @@ ipc_error_t ipc_event_flags_waitset_unsubscribe(ipc_handle_t handle,
     while (*current != NULL) {
         if (*current == listener) {
             *current = listener->next;
+            listener->next = NULL;
+            if (event_flags->waitset_listeners > 0) {
+                event_flags->waitset_listeners--;
+            }
             break;
         }
         current = &(*current)->next;
@@ -590,3 +622,112 @@ ipc_error_t ipc_event_flags_waitset_unsubscribe(ipc_handle_t handle,
     portEXIT_CRITICAL(&event_flags->header.lock);
     return IPC_OK;
 }
+#else
+{
+    (void)handle;
+    (void)listener;
+    return IPC_ERR_NOT_SUPPORTED;
+}
+#endif
+
+#else
+
+void ipc_event_flags_module_init(void)
+{
+}
+
+static inline ipc_error_t ipc_event_flags_not_supported(void)
+{
+    return IPC_ERR_NOT_SUPPORTED;
+}
+
+ipc_error_t ipc_event_flags_create(ipc_event_flags_mode_t mode,
+                                   ipc_event_flags_mask_mode_t mask_mode,
+                                   ipc_handle_t *out_handle)
+{
+    (void)mode;
+    (void)mask_mode;
+    (void)out_handle;
+    return ipc_event_flags_not_supported();
+}
+
+ipc_error_t ipc_event_flags_destroy(ipc_handle_t handle)
+{
+    (void)handle;
+    return ipc_event_flags_not_supported();
+}
+
+ipc_error_t ipc_event_flags_set(ipc_handle_t handle, uint32_t bits)
+{
+    (void)handle;
+    (void)bits;
+    return ipc_event_flags_not_supported();
+}
+
+ipc_error_t ipc_event_flags_clear(ipc_handle_t handle, uint32_t bits)
+{
+    (void)handle;
+    (void)bits;
+    return ipc_event_flags_not_supported();
+}
+
+ipc_error_t ipc_event_flags_read(ipc_handle_t handle, uint32_t *out_mask)
+{
+    (void)handle;
+    (void)out_mask;
+    return ipc_event_flags_not_supported();
+}
+
+ipc_error_t ipc_event_flags_try_wait(ipc_handle_t handle,
+                                     ipc_event_flags_wait_type_t wait_type,
+                                     uint32_t mask)
+{
+    (void)handle;
+    (void)wait_type;
+    (void)mask;
+    return ipc_event_flags_not_supported();
+}
+
+ipc_error_t ipc_event_flags_wait(ipc_handle_t handle,
+                                 ipc_event_flags_wait_type_t wait_type,
+                                 uint32_t mask)
+{
+    (void)handle;
+    (void)wait_type;
+    (void)mask;
+    return ipc_event_flags_not_supported();
+}
+
+ipc_error_t ipc_event_flags_timed_wait(ipc_handle_t handle,
+                                       ipc_event_flags_wait_type_t wait_type,
+                                       uint32_t mask,
+                                       uint64_t timeout_us)
+{
+    (void)handle;
+    (void)wait_type;
+    (void)mask;
+    (void)timeout_us;
+    return ipc_event_flags_not_supported();
+}
+
+ipc_error_t ipc_event_flags_waitset_subscribe(ipc_handle_t handle,
+                                              ipc_waitset_listener_t *listener,
+                                              ipc_waitset_ready_cb_t callback,
+                                              void *user_data)
+{
+    (void)handle;
+    (void)listener;
+    (void)callback;
+    (void)user_data;
+    return IPC_ERR_NOT_SUPPORTED;
+}
+
+ipc_error_t ipc_event_flags_waitset_unsubscribe(ipc_handle_t handle,
+                                                ipc_waitset_listener_t *listener)
+{
+    (void)handle;
+    (void)listener;
+    return IPC_ERR_NOT_SUPPORTED;
+}
+
+#endif

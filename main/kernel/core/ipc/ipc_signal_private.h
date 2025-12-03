@@ -31,6 +31,7 @@ typedef struct ipc_signal {
     bool ready_state;
     ipc_wait_queue_t waiters;
     ipc_waitset_listener_t *listeners;
+    size_t waitset_listeners;
     struct {
         uint32_t sets;
         uint32_t waits;

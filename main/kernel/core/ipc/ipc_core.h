@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "sdkconfig.h"
 #include "freertos/portmacro.h"
 
 #ifdef __cplusplus
@@ -42,15 +43,15 @@ typedef uint32_t ipc_handle_t;
 /**
  * @brief Maximum number of signals Magnolia IPC exposes.
  */
-#define IPC_MAX_SIGNALS 8
+#define IPC_MAX_SIGNALS CONFIG_MAGNOLIA_IPC_MAX_SIGNALS
 
 /**
  * @brief Maximum number of message channels Magnolia IPC exposes.
  */
-#define IPC_MAX_CHANNELS 4
+#define IPC_MAX_CHANNELS CONFIG_MAGNOLIA_IPC_MAX_CHANNELS
 
-#define IPC_MAX_EVENT_FLAGS 8
-#define IPC_MAX_SHM_REGIONS 8
+#define IPC_MAX_EVENT_FLAGS CONFIG_MAGNOLIA_IPC_MAX_EVENT_FLAGS
+#define IPC_MAX_SHM_REGIONS CONFIG_MAGNOLIA_IPC_MAX_SHM_REGIONS
 
 /**
  * @brief Magnolai IPC error codes shared across primitives.
@@ -69,6 +70,7 @@ typedef enum {
     IPC_ERR_FULL,
     IPC_ERR_EMPTY,
     IPC_ERR_NOT_ATTACHED,
+    IPC_ERR_NOT_SUPPORTED,
 } ipc_error_t;
 
 /**
@@ -128,3 +130,12 @@ ipc_handle_registry_t *ipc_core_shm_registry(void);
 #endif
 
 #endif /* MAGNOLIA_IPC_CORE_H */
+#if CONFIG_MAGNOLIA_IPC_CHANNEL_DEFAULT_CAPACITY \
+        > CONFIG_MAGNOLIA_IPC_CHANNEL_CAPACITY_MAX
+#error "Default channel depth must not exceed channel depth maximum"
+#endif
+
+#if CONFIG_MAGNOLIA_IPC_CHANNEL_DEFAULT_MESSAGE_SIZE \
+        > CONFIG_MAGNOLIA_IPC_CHANNEL_MAX_MESSAGE_SIZE
+#error "Default channel message size must not exceed channel message size maximum"
+#endif

@@ -11,7 +11,7 @@
 
 #include "sdkconfig.h"
 
-#ifdef CONFIG_MAGNOLIA_IPC_SELFTESTS
+#if CONFIG_MAGNOLIA_IPC_ENABLED && CONFIG_MAGNOLIA_IPC_SELFTESTS
 bool ipc_channel_tests_run(void);
 #else
 static inline bool ipc_channel_tests_run(void)

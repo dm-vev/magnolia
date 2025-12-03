@@ -1,0 +1,55 @@
+menu "Shared Memory"
+	depends on MAGNOLIA_IPC_ENABLED
+
+config MAGNOLIA_IPC_SHM_ENABLED
+	bool "Enable IPC shared memory"
+	default y
+	depends on MAGNOLIA_IPC_ENABLED
+	help
+		Allow Magnolia tasks to create raw, ring buffer, and packet-based shared memory
+		regions. Disable to remove the SHM implementation from the build.
+
+config MAGNOLIA_IPC_MAX_SHM_REGIONS
+	int "Maximum shared memory regions"
+	range 1 16
+	default 8
+	depends on MAGNOLIA_IPC_SHM_ENABLED
+	help
+		Controls how many shared memory regions may coexist. Larger values improve
+		flexibility but consume registry tables and descriptor state.
+
+config MAGNOLIA_IPC_SHM_DEFAULT_REGION_SIZE
+	int "Default shared memory region size"
+	range 64 65536
+	default 4096
+	depends on MAGNOLIA_IPC_SHM_ENABLED
+	help
+		Default allocation bucket used by helpers covering Magnolia shared memory
+		regions when explicit sizes are not provided.
+
+config MAGNOLIA_IPC_SHM_DEFAULT_PACKET_PAYLOAD
+	int "Default packet payload size"
+	range 64 8192
+	default 512
+	depends on MAGNOLIA_IPC_SHM_ENABLED
+	help
+		Default payload capacity used when packet-buffer regions are created.
+		Tuned in terms of the expected packet workload.
+
+config MAGNOLIA_IPC_SHM_ALLOW_RING_BUFFER
+	bool "Allow ring buffer mode"
+	default y
+	depends on MAGNOLIA_IPC_SHM_ENABLED
+	help
+		Enable ring-buffer shared memory regions. Disable to reduce surface area and
+		prevent accidental use of the ring buffer semantic.
+
+config MAGNOLIA_IPC_SHM_ALLOW_PACKET_BUFFER
+	bool "Allow packet buffer mode"
+	default y
+	depends on MAGNOLIA_IPC_SHM_ENABLED
+	help
+		Enable packet-buffer shared memory regions that store discrete payloads.
+		Disable when only raw/ring buffers should be used.
+
+endmenu

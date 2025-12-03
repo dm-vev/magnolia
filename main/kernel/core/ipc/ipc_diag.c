@@ -14,6 +14,8 @@
 #include "kernel/core/ipc/ipc_shm_private.h"
 #include "kernel/core/ipc/ipc_signal_private.h"
 
+#if CONFIG_MAGNOLIA_IPC_ENABLE_DIAG_DUMP
+
 /**
  * @brief Report whether the channel currently holds data.
  */
@@ -196,3 +198,51 @@ ipc_error_t ipc_diag_shm_info(ipc_handle_t handle, ipc_shm_info_t *info)
 {
     return ipc_shm_query(handle, info);
 }
+
+#else
+
+static inline ipc_error_t ipc_diag_not_supported(void)
+{
+    return IPC_ERR_NOT_SUPPORTED;
+}
+
+ipc_error_t ipc_diag_object_info(ipc_handle_t handle,
+                                 ipc_object_info_t *info)
+{
+    (void)handle;
+    (void)info;
+    return ipc_diag_not_supported();
+}
+
+ipc_error_t ipc_diag_signal_info(ipc_handle_t handle,
+                                 ipc_signal_info_t *info)
+{
+    (void)handle;
+    (void)info;
+    return ipc_diag_not_supported();
+}
+
+ipc_error_t ipc_diag_channel_info(ipc_handle_t handle,
+                                  ipc_channel_info_t *info)
+{
+    (void)handle;
+    (void)info;
+    return ipc_diag_not_supported();
+}
+
+ipc_error_t ipc_diag_event_flags_info(ipc_handle_t handle,
+                                      ipc_event_flags_info_t *info)
+{
+    (void)handle;
+    (void)info;
+    return ipc_diag_not_supported();
+}
+
+ipc_error_t ipc_diag_shm_info(ipc_handle_t handle, ipc_shm_info_t *info)
+{
+    (void)handle;
+    (void)info;
+    return ipc_diag_not_supported();
+}
+
+#endif

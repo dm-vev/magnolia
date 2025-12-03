@@ -1,0 +1,57 @@
+menu "Message Channels"
+	depends on MAGNOLIA_IPC_ENABLED
+
+config MAGNOLIA_IPC_CHANNELS_ENABLED
+	bool "Enable IPC message channels"
+	default y
+	depends on MAGNOLIA_IPC_ENABLED
+	help
+		Expose bounded FIFO message channels used by producers and consumers
+		within Magnolia. Disabling removes transmit/receive helpers.
+
+config MAGNOLIA_IPC_MAX_CHANNELS
+	int "Maximum IPC channels"
+	range 1 32
+	default 4
+	depends on MAGNOLIA_IPC_CHANNELS_ENABLED
+	help
+		Controls how many channel objects can exist simultaneously. Higher values
+		allow more concurrent communications at the cost of descriptor tables.
+
+config MAGNOLIA_IPC_CHANNEL_DEFAULT_CAPACITY
+	int "Default channel queue depth"
+	range 1 32
+	default 8
+	depends on MAGNOLIA_IPC_CHANNELS_ENABLED
+	help
+		Default number of pending messages stored in each channel before senders
+		block. Larger queues smooth bursts but consume more RAM per channel.
+
+config MAGNOLIA_IPC_CHANNEL_CAPACITY_MAX
+	int "Maximum channel queue depth"
+	range 1 64
+	default 32
+	depends on MAGNOLIA_IPC_CHANNELS_ENABLED
+	help
+		Hard limit enforced by Magnolia when users request channel creation. Keep
+		it reasonable relative to available RAM.
+
+config MAGNOLIA_IPC_CHANNEL_DEFAULT_MESSAGE_SIZE
+	int "Default channel message size"
+	range 1 512
+	default 64
+	depends on MAGNOLIA_IPC_CHANNELS_ENABLED
+	help
+		Default payload size used when building helper wrappers or diagnostics
+		for channels. Larger messages increase per-channel allocations.
+
+config MAGNOLIA_IPC_CHANNEL_MAX_MESSAGE_SIZE
+	int "Maximum channel message size"
+	range 1 1024
+	default 256
+	depends on MAGNOLIA_IPC_CHANNELS_ENABLED
+	help
+		Upper bound on the message size any channel can carry. This protects from
+		overflowing static buffers and keeps per-send allocations bounded.
+
+endmenu

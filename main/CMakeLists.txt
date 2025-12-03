@@ -1,29 +1,73 @@
+set(ARCH_SRCS)
+
 if(CONFIG_IDF_TARGET_ARCH_XTENSA)
     if(CONFIG_IDF_TARGET_ESP32)
-        set(ARCH_START "kernel/arch/xtensa/esp32/start.c")
+        set(ARCH_SRCS
+            "kernel/arch/xtensa/esp32/start.c"
+            "kernel/arch/xtensa/esp32/cpu.c"
+            "kernel/arch/xtensa/esp32/memory.c"
+            "kernel/arch/xtensa/esp32/power.c"
+        )
     elseif(CONFIG_IDF_TARGET_ESP32S2)
-        set(ARCH_START "kernel/arch/xtensa/esp32s2/start.c")
+        set(ARCH_SRCS
+            "kernel/arch/xtensa/esp32s2/start.c"
+            "kernel/arch/xtensa/esp32s2/cpu.c"
+            "kernel/arch/xtensa/esp32s2/memory.c"
+            "kernel/arch/xtensa/esp32s2/power.c"
+        )
     elseif(CONFIG_IDF_TARGET_ESP32S3)
-        set(ARCH_START "kernel/arch/xtensa/esp32s3/start.c")
+        set(ARCH_SRCS
+            "kernel/arch/xtensa/esp32s3/start.c"
+            "kernel/arch/xtensa/esp32s3/cpu.c"
+            "kernel/arch/xtensa/esp32s3/memory.c"
+            "kernel/arch/xtensa/esp32s3/power.c"
+        )
     endif()
 elseif(CONFIG_IDF_TARGET_ARCH_RISCV)
     if(CONFIG_IDF_TARGET_ESP32C3)
-        set(ARCH_START "kernel/arch/riscv/esp32c3/start.c")
+        set(ARCH_SRCS
+            "kernel/arch/riscv/esp32c3/start.c"
+            "kernel/arch/riscv/esp32c3/cpu.c"
+            "kernel/arch/riscv/esp32c3/memory.c"
+            "kernel/arch/riscv/esp32c3/power.c"
+        )
     elseif(CONFIG_IDF_TARGET_ESP32C6)
-        set(ARCH_START "kernel/arch/riscv/esp32c6/start.c")
+        set(ARCH_SRCS
+            "kernel/arch/riscv/esp32c6/start.c"
+            "kernel/arch/riscv/esp32c6/cpu.c"
+            "kernel/arch/riscv/esp32c6/memory.c"
+            "kernel/arch/riscv/esp32c6/power.c"
+        )
     elseif(CONFIG_IDF_TARGET_ESP32H2)
-        set(ARCH_START "kernel/arch/riscv/esp32h2/start.c")
+        set(ARCH_SRCS
+            "kernel/arch/riscv/esp32h2/start.c"
+            "kernel/arch/riscv/esp32h2/cpu.c"
+            "kernel/arch/riscv/esp32h2/memory.c"
+            "kernel/arch/riscv/esp32h2/power.c"
+        )
     elseif(CONFIG_IDF_TARGET_ESP32P4)
-        set(ARCH_START "kernel/arch/riscv/esp32p4/start.c")
+        set(ARCH_SRCS
+            "kernel/arch/riscv/esp32p4/start.c"
+            "kernel/arch/riscv/esp32p4/cpu.c"
+            "kernel/arch/riscv/esp32p4/memory.c"
+            "kernel/arch/riscv/esp32p4/power.c"
+        )
     endif()
 endif()
 
 set(APP_SRCS
     "main.c"
     "kernel/arch/m_hw_init.c"
-    ${ARCH_START}
-    "kernel/core/timer/m_timer.c"
-    "kernel/core/sched/m_sched.c"
+    ${ARCH_SRCS}
+    "kernel/core/timer/m_timer_core.c"
+    "kernel/core/timer/m_timer_deadline.c"
+    "kernel/core/timer/m_timer_queue.c"
+    "kernel/core/timer/m_timer_diag.c"
+    "kernel/core/sched/m_sched_core.c"
+    "kernel/core/sched/m_sched_wait.c"
+    "kernel/core/sched/m_sched_sleep.c"
+    "kernel/core/sched/m_sched_worker.c"
+    "kernel/core/sched/m_sched_diag.c"
 )
 
 if(CONFIG_MAGNOLIA_JOB_ENABLED)
@@ -41,26 +85,32 @@ if(CONFIG_MAGNOLIA_JOB_ENABLED)
     )
 endif()
 
-list(APPEND APP_SRCS
-    "kernel/core/ipc/ipc.c"
-    "kernel/core/ipc/ipc_core.c"
-    "kernel/core/ipc/ipc_scheduler_bridge.c"
-    "kernel/core/ipc/ipc_signal.c"
-    "kernel/core/ipc/ipc_shm.c"
-    "kernel/core/ipc/ipc_diag.c"
-    "kernel/core/ipc/ipc_channel.c"
-    "kernel/core/ipc/ipc_event_flags.c"
-)
+if(CONFIG_MAGNOLIA_IPC_ENABLED)
+    list(APPEND APP_SRCS
+        "kernel/core/ipc/ipc.c"
+        "kernel/core/ipc/ipc_core.c"
+        "kernel/core/ipc/ipc_scheduler_bridge.c"
+        "kernel/core/ipc/ipc_signal.c"
+        "kernel/core/ipc/ipc_shm.c"
+        "kernel/core/ipc/ipc_diag.c"
+        "kernel/core/ipc/ipc_channel.c"
+        "kernel/core/ipc/ipc_event_flags.c"
+    )
 
-if(CONFIG_MAGNOLIA_IPC_SELFTESTS)
-    list(APPEND APP_SRCS "kernel/core/ipc/tests/ipc_signal_tests.c")
-    list(APPEND APP_SRCS "kernel/core/ipc/tests/ipc_channel_tests.c")
-    list(APPEND APP_SRCS "kernel/core/ipc/tests/ipc_event_flags_tests.c")
-    list(APPEND APP_SRCS "kernel/core/ipc/tests/ipc_shm_tests.c")
+    if(CONFIG_MAGNOLIA_IPC_SELFTESTS)
+        list(APPEND APP_SRCS "kernel/core/ipc/tests/ipc_signal_tests.c")
+        list(APPEND APP_SRCS "kernel/core/ipc/tests/ipc_channel_tests.c")
+        list(APPEND APP_SRCS "kernel/core/ipc/tests/ipc_event_flags_tests.c")
+        list(APPEND APP_SRCS "kernel/core/ipc/tests/ipc_shm_tests.c")
+    endif()
 endif()
 
 list(APPEND APP_SRCS
     "kernel/core/sched/tests/m_sched_tests.c"
+)
+
+list(APPEND APP_SRCS
+    "kernel/core/timer/tests/m_timer_tests.c"
 )
 
 if(CONFIG_MAGNOLIA_JOB_ENABLED AND CONFIG_MAGNOLIA_JOB_SELFTESTS)
@@ -74,5 +124,6 @@ idf_component_register(
         "kernel/core/sched"
         "kernel/core/job"
         "kernel/core/ipc"
+        "lib"
         "lib/libexec"
 )

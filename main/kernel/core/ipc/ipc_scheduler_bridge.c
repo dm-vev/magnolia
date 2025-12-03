@@ -8,6 +8,8 @@
 
 #include "kernel/core/ipc/ipc_scheduler_bridge.h"
 
+#include <string.h>
+
 #include "freertos/task.h"
 
 static m_sched_wait_result_t ipc_bridge_map_to_sched(ipc_wait_result_t result)
@@ -56,8 +58,7 @@ void ipc_waiter_prepare(ipc_waiter_t *waiter,
         return;
     }
 
-    waiter->prev = NULL;
-    waiter->next = NULL;
+    memset(waiter, 0, sizeof(*waiter));
     waiter->enqueued = false;
     m_sched_wait_context_prepare_with_reason(&waiter->ctx, reason);
 }

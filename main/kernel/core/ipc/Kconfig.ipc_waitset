@@ -1,0 +1,23 @@
+menu "WaitSets"
+	depends on MAGNOLIA_IPC_ENABLED
+
+config MAGNOLIA_IPC_WAITSET_ENABLED
+	bool "Enable IPC waitsets"
+	default y
+	depends on MAGNOLIA_IPC_ENABLED
+	help
+		Expose the Magnolia waitset notifications used by signals and event
+		flags. Disable this to drive only blocking waits in combination with the
+		existing primitives.
+
+config MAGNOLIA_IPC_WAITSET_MAX_ENTRIES
+	int "Maximum waitset listeners"
+	range 1 32
+	default 8
+	depends on MAGNOLIA_IPC_WAITSET_ENABLED
+	help
+		Maximum number of waitset listeners that can be attached to a single IPC
+		primitive at once. Raising this protects waitset usage in high fan-out
+		scenarios.
+
+endmenu

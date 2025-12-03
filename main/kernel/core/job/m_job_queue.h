@@ -11,6 +11,9 @@
 #include <stddef.h>
 
 #include "sdkconfig.h"
+#ifndef CONFIG_MAGNOLIA_JOB_ENABLE_EXTENDED_DIAGNOSTICS
+#define CONFIG_MAGNOLIA_JOB_ENABLE_EXTENDED_DIAGNOSTICS 0
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "kernel/core/sched/m_sched.h"
@@ -79,19 +82,6 @@ typedef struct m_job_submit_wait_node {
     bool linked;
 } m_job_submit_wait_node_t;
 
-/**
- * @brief   Internal helpers for queue locking.
- */
-static inline void _m_job_queue_lock(m_job_queue_t *queue)
-{
-    xSemaphoreTake(queue->lock, portMAX_DELAY);
-}
-
-static inline void _m_job_queue_unlock(m_job_queue_t *queue)
-{
-    xSemaphoreGive(queue->lock);
-}
-
 struct m_job_queue {
     char name[M_JOB_QUEUE_NAME_MAX_LEN];
     size_t capacity;
@@ -114,6 +104,19 @@ struct m_job_queue {
     bool debug;
     size_t active_workers;
 };
+
+/**
+ * @brief   Internal helpers for queue locking.
+ */
+static inline void _m_job_queue_lock(m_job_queue_t *queue)
+{
+    xSemaphoreTake(queue->lock, portMAX_DELAY);
+}
+
+static inline void _m_job_queue_unlock(m_job_queue_t *queue)
+{
+    xSemaphoreGive(queue->lock);
+}
 
 /**
  * @brief   Create a worker queue that executes Magnolia job handlers.

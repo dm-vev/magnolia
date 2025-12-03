@@ -4,6 +4,9 @@
  */
 
 #include "sdkconfig.h"
+#ifndef CONFIG_MAGNOLIA_JOB_ENABLE_EXTENDED_DIAGNOSTICS
+#define CONFIG_MAGNOLIA_JOB_ENABLE_EXTENDED_DIAGNOSTICS 0
+#endif
 #include "freertos/portmacro.h"
 #include "kernel/core/job/m_job_diag.h"
 

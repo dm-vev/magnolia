@@ -1,0 +1,21 @@
+menu "Event Flags"
+	depends on MAGNOLIA_IPC_ENABLED
+
+config MAGNOLIA_IPC_EVENT_FLAGS_ENABLED
+	bool "Enable IPC event flags"
+	default y
+	depends on MAGNOLIA_IPC_ENABLED
+	help
+		Support event flags with masks, wait queues, and waitset notifications.
+		Disable to reduce runtime state when only channels or signals are used.
+
+config MAGNOLIA_IPC_MAX_EVENT_FLAGS
+	int "Maximum event flag objects"
+	range 1 16
+	default 8
+	depends on MAGNOLIA_IPC_EVENT_FLAGS_ENABLED
+	help
+		Limits the number of allocated event flag handles Magnolia tracks at
+		once. Increasing this value expands the registry arrays.
+
+endmenu

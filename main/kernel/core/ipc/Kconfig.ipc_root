@@ -1,0 +1,39 @@
+menu "IPC Subsystem (Magnolia)"
+
+config MAGNOLIA_IPC_ENABLED
+	bool "Enable Magnolia IPC subsystem"
+	default y
+	help
+		Enable the Magnolia IPC stack (signals, channels, event flags, waitsets,
+		and shared memory). Disable to reduce RAM when IPC primitives are unnecessary.
+
+config MAGNOLIA_IPC_DEBUG
+	bool "Enable IPC debug logging"
+	default n
+	depends on MAGNOLIA_IPC_ENABLED
+	help
+		Turn on verbose logging for IPC primitives. This increases flash/RAM.
+
+config MAGNOLIA_IPC_ENABLE_DIAG_DUMP
+	bool "Enable IPC diagnostics export"
+	default n
+	depends on MAGNOLIA_IPC_ENABLED
+	help
+		Expose APIs that dump internal IPC object state for debugging.
+
+config MAGNOLIA_IPC_SELFTESTS
+	bool "Run IPC self-tests"
+	default n
+	depends on MAGNOLIA_IPC_ENABLED
+	help
+		Run the built-in IPC regression suites during boot.
+
+if MAGNOLIA_IPC_ENABLED
+	source "../main/kernel/core/ipc/Kconfig.ipc_signal"
+	source "../main/kernel/core/ipc/Kconfig.ipc_channel"
+	source "../main/kernel/core/ipc/Kconfig.ipc_event_flags"
+	source "../main/kernel/core/ipc/Kconfig.ipc_waitset"
+	source "../main/kernel/core/ipc/Kconfig.ipc_shm"
+endif
+
+endmenu

@@ -11,6 +11,8 @@
 #include "kernel/core/ipc/ipc_channel_private.h"
 #include "kernel/core/timer/m_timer.h"
 
+#if CONFIG_MAGNOLIA_IPC_CHANNELS_ENABLED
+
 static ipc_channel_t g_channels[IPC_MAX_CHANNELS];
 
 static inline ipc_handle_registry_t *ipc_channel_registry(void)
@@ -537,3 +539,102 @@ ipc_error_t m_ipc_channel_timed_recv(ipc_handle_t handle,
                                         out_length,
                                         timeout_us);
 }
+
+#else
+
+void m_ipc_channel_module_init(void)
+{
+}
+
+static inline ipc_error_t _m_ipc_channel_not_supported(void)
+{
+    return IPC_ERR_NOT_SUPPORTED;
+}
+
+ipc_error_t m_ipc_channel_create(size_t capacity,
+                                 size_t message_size,
+                                 ipc_handle_t *out_handle)
+{
+    (void)capacity;
+    (void)message_size;
+    (void)out_handle;
+    return _m_ipc_channel_not_supported();
+}
+
+ipc_error_t m_ipc_channel_destroy(ipc_handle_t handle)
+{
+    (void)handle;
+    return _m_ipc_channel_not_supported();
+}
+
+ipc_error_t m_ipc_channel_send(ipc_handle_t handle,
+                               const void *message,
+                               size_t length)
+{
+    (void)handle;
+    (void)message;
+    (void)length;
+    return _m_ipc_channel_not_supported();
+}
+
+ipc_error_t m_ipc_channel_try_send(ipc_handle_t handle,
+                                   const void *message,
+                                   size_t length)
+{
+    (void)handle;
+    (void)message;
+    (void)length;
+    return _m_ipc_channel_not_supported();
+}
+
+ipc_error_t m_ipc_channel_timed_send(ipc_handle_t handle,
+                                     const void *message,
+                                     size_t length,
+                                     uint64_t timeout_us)
+{
+    (void)handle;
+    (void)message;
+    (void)length;
+    (void)timeout_us;
+    return _m_ipc_channel_not_supported();
+}
+
+ipc_error_t m_ipc_channel_recv(ipc_handle_t handle,
+                               void *out_buffer,
+                               size_t buffer_size,
+                               size_t *out_length)
+{
+    (void)handle;
+    (void)out_buffer;
+    (void)buffer_size;
+    (void)out_length;
+    return _m_ipc_channel_not_supported();
+}
+
+ipc_error_t m_ipc_channel_try_recv(ipc_handle_t handle,
+                                   void *out_buffer,
+                                   size_t buffer_size,
+                                   size_t *out_length)
+{
+    (void)handle;
+    (void)out_buffer;
+    (void)buffer_size;
+    (void)out_length;
+    return _m_ipc_channel_not_supported();
+}
+
+ipc_error_t m_ipc_channel_timed_recv(ipc_handle_t handle,
+                                     void *out_buffer,
+                                     size_t buffer_size,
+                                     size_t *out_length,
+                                     uint64_t timeout_us)
+{
+    (void)handle;
+    (void)out_buffer;
+    (void)buffer_size;
+    (void)out_length;
+    (void)timeout_us;
+    return _m_ipc_channel_not_supported();
+}
+
+#endif

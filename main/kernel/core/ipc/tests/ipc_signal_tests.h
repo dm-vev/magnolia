@@ -3,7 +3,7 @@
 
 #include "sdkconfig.h"
 
-#ifdef CONFIG_MAGNOLIA_IPC_SELFTESTS
+#if CONFIG_MAGNOLIA_IPC_ENABLED && CONFIG_MAGNOLIA_IPC_SELFTESTS
 void ipc_selftests_run(void);
 #else
 static inline void ipc_selftests_run(void) { }

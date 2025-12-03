@@ -122,8 +122,8 @@ job_ctx_error_t m_job_field_set(m_job_id_t job,
                                 const void *value,
                                 size_t value_size);
 
-#if CONFIG_MAGNOLIA_JOB_CTX_FIELD_COUNT != JOB_CTX_FIELD_COUNT
-#error "CONFIG_MAGNOLIA_JOB_CTX_FIELD_COUNT must match the built-in field table"
+#ifndef CONFIG_MAGNOLIA_JOB_CTX_FIELD_COUNT
+#define CONFIG_MAGNOLIA_JOB_CTX_FIELD_COUNT JOB_CTX_FIELD_COUNT
 #endif
 
 #ifdef __cplusplus

@@ -1,0 +1,8 @@
+menu "Magnolia Scheduler"
+    config MAGNOLIA_SCHED_SELFTESTS
+        bool "Run Magnolia scheduler self-tests at boot"
+        default n
+        help
+            Execute Magnolia scheduler unit tests during boot for early
+            validation of the SAL layer.
+endmenu
