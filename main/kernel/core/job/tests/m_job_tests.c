@@ -1,6 +1,6 @@
 #include "sdkconfig.h"
 
-#ifdef CONFIG_MAGNOLIA_JOB_SELFTESTS
+#if CONFIG_MAGNOLIA_JOB_ENABLED && CONFIG_MAGNOLIA_JOB_SELFTESTS
 
 #include <string.h>
 
@@ -754,4 +754,4 @@ void m_job_selftests_run(void)
 
 #include "kernel/core/job/tests/m_job_tests.h"
 
-#endif /* CONFIG_MAGNOLIA_JOB_SELFTESTS */
+#endif /* CONFIG_MAGNOLIA_JOB_ENABLED && CONFIG_MAGNOLIA_JOB_SELFTESTS */

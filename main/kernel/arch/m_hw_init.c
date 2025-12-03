@@ -23,7 +23,7 @@ void magnolia_hw_init(void)
     ipc_selftests_run();
 #endif
 
-#ifdef CONFIG_MAGNOLIA_JOB_SELFTESTS
+#if CONFIG_MAGNOLIA_JOB_ENABLED && CONFIG_MAGNOLIA_JOB_SELFTESTS
     m_job_selftests_run();
 #endif
 }

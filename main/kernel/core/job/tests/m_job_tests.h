@@ -3,7 +3,7 @@
 
 #include "sdkconfig.h"
 
-#ifdef CONFIG_MAGNOLIA_JOB_SELFTESTS
+#if CONFIG_MAGNOLIA_JOB_ENABLED && CONFIG_MAGNOLIA_JOB_SELFTESTS
 void m_job_selftests_run(void);
 #else
 static inline void m_job_selftests_run(void) {}

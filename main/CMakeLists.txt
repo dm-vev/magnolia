@@ -24,15 +24,24 @@ set(APP_SRCS
     ${ARCH_START}
     "kernel/core/timer/m_timer.c"
     "kernel/core/sched/m_sched.c"
-    "kernel/core/job/m_job.c"
-    "kernel/core/job/m_job_core.c"
-    "kernel/core/job/m_job_queue.c"
-    "kernel/core/job/m_job_worker.c"
-    "kernel/core/job/m_job_result.c"
-    "kernel/core/job/m_job_future.c"
-    "kernel/core/job/m_job_wait.c"
-    "kernel/core/job/m_job_diag.c"
-    "kernel/core/job/jctx.c"
+)
+
+if(CONFIG_MAGNOLIA_JOB_ENABLED)
+    list(APPEND APP_SRCS
+        "kernel/core/job/m_job.c"
+        "kernel/core/job/m_job_core.c"
+        "kernel/core/job/m_job_queue.c"
+        "kernel/core/job/m_job_worker.c"
+        "kernel/core/job/m_job_result.c"
+        "kernel/core/job/m_job_future.c"
+        "kernel/core/job/m_job_wait.c"
+        "kernel/core/job/m_job_diag.c"
+        "kernel/core/job/jctx.c"
+        "lib/libexec/job_ctx.c"
+    )
+endif()
+
+list(APPEND APP_SRCS
     "kernel/core/ipc/ipc.c"
     "kernel/core/ipc/ipc_core.c"
     "kernel/core/ipc/ipc_scheduler_bridge.c"
@@ -52,9 +61,11 @@ endif()
 
 list(APPEND APP_SRCS
     "kernel/core/sched/tests/m_sched_tests.c"
-    "kernel/core/job/tests/m_job_tests.c"
-    "lib/libexec/job_ctx.c"
 )
+
+if(CONFIG_MAGNOLIA_JOB_ENABLED AND CONFIG_MAGNOLIA_JOB_SELFTESTS)
+    list(APPEND APP_SRCS "kernel/core/job/tests/m_job_tests.c")
+endif()
 idf_component_register(
     SRCS ${APP_SRCS}
     INCLUDE_DIRS

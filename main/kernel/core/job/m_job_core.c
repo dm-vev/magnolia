@@ -85,6 +85,7 @@ m_job_handle_t *_m_job_handle_create(m_job_handler_t handler,
 
 m_job_error_t m_job_cancel(m_job_id_t job)
 {
+#if CONFIG_MAGNOLIA_JOB_ENABLE_CANCELLATION
     if (job == NULL) {
         return M_JOB_ERR_INVALID_HANDLE;
     }
@@ -97,6 +98,10 @@ m_job_error_t m_job_cancel(m_job_id_t job)
     _m_job_handle_record_cancellation(job);
     portEXIT_CRITICAL(&job->lock);
     return M_JOB_OK;
+#else
+    (void)job;
+    return M_JOB_ERR_STATE;
+#endif
 }
 
 m_job_error_t m_job_handle_destroy(m_job_id_t job)

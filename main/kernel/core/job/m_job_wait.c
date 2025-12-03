@@ -7,6 +7,8 @@
 #include "kernel/core/job/m_job_wait.h"
 #include "kernel/core/job/m_job_future.h"
 
+#if CONFIG_MAGNOLIA_JOB_ENABLE_FUTURES
+
 /**
  * @brief   Helper that waits on a job by temporarily creating a future.
  */
@@ -55,3 +57,33 @@ m_job_future_wait_result_t m_job_try_wait_for_job(m_job_id_t job,
     m_job_future_deinit(&future);
     return wait_result;
 }
+
+#else
+
+m_job_future_wait_result_t m_job_wait_for_job(m_job_id_t job,
+                                               m_job_result_descriptor_t *result)
+{
+    (void)job;
+    (void)result;
+    return M_JOB_FUTURE_WAIT_DESTROYED;
+}
+
+m_job_future_wait_result_t m_job_wait_for_job_timed(m_job_id_t job,
+                                                    const m_timer_deadline_t *deadline,
+                                                    m_job_result_descriptor_t *result)
+{
+    (void)job;
+    (void)deadline;
+    (void)result;
+    return M_JOB_FUTURE_WAIT_DESTROYED;
+}
+
+m_job_future_wait_result_t m_job_try_wait_for_job(m_job_id_t job,
+                                                   m_job_result_descriptor_t *result)
+{
+    (void)job;
+    (void)result;
+    return M_JOB_FUTURE_WAIT_DESTROYED;
+}
+
+#endif

@@ -9,6 +9,8 @@
 #include "kernel/core/job/m_job_core.h"
 #include "kernel/core/sched/m_sched.h"
 
+#if CONFIG_MAGNOLIA_JOB_ENABLE_FUTURES
+
 /**
  * @brief   Convert IPC wait results into job future wait codes.
  */
@@ -171,3 +173,46 @@ m_job_future_wait_result_t m_job_future_try(m_job_future_t *future,
     portEXIT_CRITICAL(&job->lock);
     return M_JOB_FUTURE_WAIT_NOT_READY;
 }
+
+#else
+m_job_error_t m_job_future_init(m_job_future_t *future, m_job_id_t job)
+{
+    (void)future;
+    (void)job;
+    return M_JOB_ERR_STATE;
+}
+
+void m_job_future_deinit(m_job_future_t *future)
+{
+    (void)future;
+}
+
+m_job_future_wait_result_t m_job_future_wait(m_job_future_t *future,
+                                             const m_timer_deadline_t *deadline,
+                                             m_job_result_descriptor_t *result)
+{
+    (void)future;
+    (void)deadline;
+    (void)result;
+    return M_JOB_FUTURE_WAIT_DESTROYED;
+}
+
+m_job_future_wait_result_t m_job_future_wait_timed(m_job_future_t *future,
+                                                   uint64_t timeout_us,
+                                                   m_job_result_descriptor_t *result)
+{
+    (void)future;
+    (void)timeout_us;
+    (void)result;
+    return M_JOB_FUTURE_WAIT_DESTROYED;
+}
+
+m_job_future_wait_result_t m_job_future_try(m_job_future_t *future,
+                                            m_job_result_descriptor_t *result)
+{
+    (void)future;
+    (void)result;
+    return M_JOB_FUTURE_WAIT_DESTROYED;
+}
+
+#endif

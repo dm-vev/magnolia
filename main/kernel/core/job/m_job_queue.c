@@ -295,6 +295,11 @@ m_job_queue_t *m_job_queue_create(const m_job_queue_config_t *config)
         return NULL;
     }
 
+    if (config->capacity > CONFIG_MAGNOLIA_JOB_QUEUE_CAPACITY_MAX
+        || config->worker_count > CONFIG_MAGNOLIA_JOB_QUEUE_WORKER_COUNT_MAX) {
+        return NULL;
+    }
+
     m_job_queue_t *queue = pvPortMalloc(sizeof(*queue));
     if (queue == NULL) {
         return NULL;

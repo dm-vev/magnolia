@@ -12,6 +12,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "sdkconfig.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -22,11 +24,11 @@ typedef struct m_job_handle m_job_handle_t;
 typedef m_job_handle_t *m_job_id_t;
 #endif
 
-#define JOB_CTX_CWD_MAX_LEN 64
-#define JOB_CTX_ATTR_KEY_MAX_LEN 16
-#define JOB_CTX_ATTR_VALUE_MAX_LEN 32
-#define JOB_CTX_USER_ATTR_MAX 4
-#define JOB_CTX_TLS_SLOT_COUNT 4
+#define JOB_CTX_CWD_MAX_LEN CONFIG_MAGNOLIA_JOB_CTX_CWD_MAX_LEN
+#define JOB_CTX_ATTR_KEY_MAX_LEN CONFIG_MAGNOLIA_JOB_CTX_ATTR_KEY_MAX_LEN
+#define JOB_CTX_ATTR_VALUE_MAX_LEN CONFIG_MAGNOLIA_JOB_CTX_ATTR_VALUE_MAX_LEN
+#define JOB_CTX_USER_ATTR_MAX CONFIG_MAGNOLIA_JOB_CTX_USER_ATTR_MAX
+#define JOB_CTX_TLS_SLOT_COUNT CONFIG_MAGNOLIA_JOB_CTX_TLS_SLOT_COUNT
 
 typedef enum {
     JOB_CTX_OK = 0,
@@ -119,6 +121,10 @@ job_ctx_error_t m_job_field_set(m_job_id_t job,
                                 job_ctx_field_id_t field,
                                 const void *value,
                                 size_t value_size);
+
+#if CONFIG_MAGNOLIA_JOB_CTX_FIELD_COUNT != JOB_CTX_FIELD_COUNT
+#error "CONFIG_MAGNOLIA_JOB_CTX_FIELD_COUNT must match the built-in field table"
+#endif
 
 #ifdef __cplusplus
 }

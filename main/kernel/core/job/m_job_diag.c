@@ -6,7 +6,12 @@
 #include "sdkconfig.h"
 #include "freertos/portmacro.h"
 #include "kernel/core/job/m_job_diag.h"
+
+#if CONFIG_MAGNOLIA_JOB_ENABLE_EXTENDED_DIAGNOSTICS
 #include "kernel/core/job/jctx.h"
+#endif
+
+#if CONFIG_MAGNOLIA_JOB_ENABLE_EXTENDED_DIAGNOSTICS
 
 m_job_error_t m_job_diag_info(m_job_id_t job, m_job_diag_info_t *info)
 {
@@ -73,3 +78,22 @@ m_job_error_t m_job_future_diag(const m_job_future_t *future,
     portEXIT_CRITICAL(&future->job->lock);
     return M_JOB_OK;
 }
+
+#else
+
+m_job_error_t m_job_diag_info(m_job_id_t job, m_job_diag_info_t *info)
+{
+    (void)job;
+    (void)info;
+    return M_JOB_ERR_STATE;
+}
+
+m_job_error_t m_job_future_diag(const m_job_future_t *future,
+                                m_job_future_diag_info_t *info)
+{
+    (void)future;
+    (void)info;
+    return M_JOB_ERR_STATE;
+}
+
+#endif

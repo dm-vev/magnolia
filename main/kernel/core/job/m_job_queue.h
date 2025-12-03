@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define M_JOB_QUEUE_NAME_MAX_LEN 24
+#define M_JOB_QUEUE_NAME_MAX_LEN CONFIG_MAGNOLIA_JOB_QUEUE_NAME_MAX_LEN
 
 /**
  * @brief   Cumulative statistics emitted by the queue.
@@ -64,11 +64,11 @@ typedef struct {
 #define M_JOB_QUEUE_CONFIG_DEFAULT                                             \
     {                                                                          \
         .name = "job_queue",                                                   \
-        .capacity = 8,                                                         \
-        .worker_count = 1,                                                     \
-        .stack_depth = configMINIMAL_STACK_SIZE,                              \
-        .priority = (tskIDLE_PRIORITY + 1),                                   \
-        .debug_log = false,                                                    \
+        .capacity = CONFIG_MAGNOLIA_JOB_QUEUE_DEFAULT_CAPACITY,                \
+        .worker_count = CONFIG_MAGNOLIA_JOB_QUEUE_DEFAULT_WORKER_COUNT,        \
+        .stack_depth = CONFIG_MAGNOLIA_JOB_WORKER_STACK_DEPTH,                 \
+        .priority = CONFIG_MAGNOLIA_JOB_WORKER_PRIORITY,                       \
+        .debug_log = CONFIG_MAGNOLIA_JOB_ENABLE_EXTENDED_DIAGNOSTICS,          \
     }
 
 typedef struct m_job_queue m_job_queue_t;

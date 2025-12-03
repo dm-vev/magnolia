@@ -21,11 +21,6 @@ menu "MagnoliaOS Configuration"
             Execute Magnolia scheduler unit tests during boot for early
             validation of the SAL layer.
 
-    config MAGNOLIA_JOB_SELFTESTS
-        bool "Run Magnolia job subsystem self-tests at boot"
-        default n
-        help
-            Execute Magnolia job queue unit tests during boot to verify job
-            submission, queue-full handling, and shutdown semantics.
+    source "../main/kernel/core/job/Kconfig.job"
 
 endmenu

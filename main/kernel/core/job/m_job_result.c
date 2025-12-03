@@ -7,6 +7,8 @@
 #include "freertos/portmacro.h"
 #include "kernel/core/job/m_job_result.h"
 
+#if CONFIG_MAGNOLIA_JOB_ENABLE_RESULTS
+
 m_job_error_t m_job_query_result(m_job_id_t job,
                                  m_job_result_descriptor_t *result)
 {
@@ -27,3 +29,15 @@ m_job_error_t m_job_query_result(m_job_id_t job,
     portEXIT_CRITICAL(&job->lock);
     return M_JOB_OK;
 }
+
+#else
+
+m_job_error_t m_job_query_result(m_job_id_t job,
+                                 m_job_result_descriptor_t *result)
+{
+    (void)job;
+    (void)result;
+    return M_JOB_ERR_STATE;
+}
+
+#endif
