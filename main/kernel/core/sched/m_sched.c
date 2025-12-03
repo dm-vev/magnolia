@@ -1,7 +1,6 @@
 #include <string.h>
 
 #include "kernel/core/sched/m_sched.h"
-
 static StaticSemaphore_t g_sched_registry_lock_storage;
 static SemaphoreHandle_t g_sched_registry_lock;
 static m_sched_task_metadata_t *g_task_registry_head;
@@ -354,7 +353,7 @@ void m_sched_task_yield(void)
 
 m_sched_wait_result_t m_sched_sleep_ms(uint32_t milliseconds)
 {
-    m_sched_wait_context_t context;
+    m_sched_wait_context_t context = {0};
     m_sched_wait_context_prepare_with_reason(&context,
                                             M_SCHED_WAIT_REASON_DELAY);
     uint64_t microseconds = (uint64_t)milliseconds * 1000ULL;
@@ -364,7 +363,7 @@ m_sched_wait_result_t m_sched_sleep_ms(uint32_t milliseconds)
 
 m_sched_wait_result_t m_sched_sleep_until(m_timer_time_t deadline)
 {
-    m_sched_wait_context_t context;
+    m_sched_wait_context_t context = {0};
     m_sched_wait_context_prepare_with_reason(&context,
                                             M_SCHED_WAIT_REASON_DELAY);
     m_timer_deadline_t target = {.target = deadline,
@@ -442,7 +441,9 @@ m_sched_wait_result_t m_sched_wait_block(m_sched_wait_context_t *ctx,
         return ctx->result;
     }
 
-    ctx->result = M_SCHED_WAIT_RESULT_TIMEOUT;
+    ctx->result = (ctx->reason == M_SCHED_WAIT_REASON_DELAY)
+                      ? M_SCHED_WAIT_RESULT_OK
+                      : M_SCHED_WAIT_RESULT_TIMEOUT;
     return ctx->result;
 }
 

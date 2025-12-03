@@ -1,3 +1,11 @@
+/*
+ * Magnolia OS — IPC Subsystem
+ * Purpose:
+ *     Bridge between Magnolia scheduler waits and IPC wait queues.
+ *
+ * © 2025 Magnolia Project
+ */
+
 #ifndef MAGNOLIA_IPC_SCHEDULER_BRIDGE_H
 #define MAGNOLIA_IPC_SCHEDULER_BRIDGE_H
 
@@ -40,7 +48,8 @@ typedef struct {
 } ipc_wait_queue_t;
 
 void ipc_wait_queue_init(ipc_wait_queue_t *queue);
-void ipc_waiter_prepare(ipc_waiter_t *waiter);
+void ipc_waiter_prepare(ipc_waiter_t *waiter,
+                        m_sched_wait_reason_t reason);
 void ipc_waiter_enqueue(ipc_wait_queue_t *queue, ipc_waiter_t *waiter);
 bool ipc_waiter_remove(ipc_wait_queue_t *queue, ipc_waiter_t *waiter);
 ipc_wait_result_t ipc_waiter_block(ipc_waiter_t *waiter,

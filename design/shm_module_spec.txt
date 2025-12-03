@@ -1,0 +1,111 @@
+Shared Memory (SHM) Module — Technical Specification
+
+1. Purpose
+   The SHM module provides Magnolia OS with a deterministic, high-performance shared
+   memory facility that lets drivers, subsystems, IPC pipelines, VFS layers, and user-
+   level services exchange data through a common region. The implementation integrates
+   with the Magnolia Scheduler, Magnolia Timer, and Magnolia IPC wait/wake semantics,
+   and avoids any FreeRTOS primitives.
+
+2. Object Model
+   - SHM Region: descriptor tracking allocated buffer, size, access mode, destroyed flag,
+     reference count, optional mode metadata, and wait queues for reader/writer waiters.
+   - SHM Handle: opaque (index + generation) validated by the registry for every operation.
+   - SHM Attachment: per-task view storing permissions, lifetime metadata, and state
+     such as cursor/mapping specific to the chosen mode.
+   - SHM Waiter: Magnolia wait context representing a blocked task waiting for a readiness
+     condition.
+   All regions reside in a global registry guarded by an internal lock; descriptor validation
+   is mandatory before acting on a handle.
+
+3. Memory Semantics
+   A region stores:
+   - pointer to allocated payload (single allocation at create, freed after destroy when no
+     attachments exist)
+   - size
+   - access mode (READ_ONLY, WRITE_ONLY, READ_WRITE)
+   - destroyed flag and refcount for attachments
+   - wait queues for readers and writers, and optional mode-specific metadata.
+   Fast paths must avoid additional allocations—only initial create and final destroy touch the
+   allocator.
+
+4. Access Control
+   Attachments are mandatory before read/write access and include:
+   - explicit allowed operations
+   - lifetime/state metadata (cursor, packet tracking, etc.)
+   - attachment-local mode-specific tracking
+   Access enforcement:
+   - read-only attachments forbid write APIs; write-only forbid read APIs.
+   - invalid, stale, or destroyed handles return consistent error codes.
+   Attach/detach must tolerate concurrency while remaining mutually consistent with destroy.
+
+5. Synchronization
+   - All region-level actions execute under the region lock, with wake-ups deferred until
+     after the lock is released to avoid deadlocks.
+   - Supported wait operations:
+     * blocking/timed read readiness wait (context reason SHM_READ)
+     * blocking/timed write readiness wait (reason SHM_WRITE)
+     * non-blocking readiness probes
+   - Timed waits use the Magnolia monotonic timer with deterministic cancellation hooks.
+   - Destroy or detach operations signal waiting tasks.
+   - Waiter ordering is FIFO among equal-priority tasks.
+
+6. Region Modes
+   Mode is selected at creation and stored in region metadata without altering the base
+   descriptor model. Modes share locking rules and notification semantics.
+   a. Raw Memory Mode: user-managed direct read/write pointers; no implicit wake unless
+      explicitly triggered by the producer.
+   b. Ring Buffer Mode: SHM layer maintains head/tail pointers, full/empty detection,
+      and deterministic overwrite policy (drop or block); waiters blocked for space/data wake
+      on the correct condition.
+   c. Packet Buffer Mode: region embeds packet metadata and enforces atomic packet
+      boundaries, blocking waiters until a full packet exists.
+
+7. API Surface (Magnolia error model)
+   - `shm_create(size, mode, options)` returns handle or INVALID/NO_PERMISSION.
+   - `shm_destroy(handle)` waits for attachments, signals delete waiters, returns OK/INVALID/DESTROYED.
+   - `shm_attach(handle, access_mode)` returns attachment handle or error (NO_PERMISSION, DESTROYED, INVALID).
+   - `shm_detach(attachment)` releases attachment, decrements references, wakes destroy waiters.
+   - `shm_read`, `shm_read_timed`, `shm_try_read`; `shm_write`, `shm_write_timed`, `shm_try_write`.
+   - `shm_control` for flush/reset/state; `shm_query` returns diagnostics.
+   All APIs use Magnolia error codes: OK, INVALID_HANDLE, DESTROYED, NO_PERMISSION, WOULD_BLOCK, TIMEOUT, FULL, EMPTY, NOT_ATTACHED.
+
+8. Blocking & Timed Operations
+   - Blocking calls transition the calling task into Magnolia's WAIT state with the correct reason.
+   - If data/space is unavailable, tasks sleep on wait queues until the condition, timeout, or destroy.
+   - Timed waits employ the timer for deterministic timeouts and cancellation.
+   - Destroy, detach, or explicit notifications wake waiters early.
+
+9. Concurrency & Guarantees
+   - All per-region read/write actions hold the region lock for safety.
+   - Attach/detach are mutually exclusive with destroy to prevent resource races.
+   - Wake-up occurs outside the lock and follows strict ordering rules to avoid starvation.
+   - Region destruction is postponed until refcount hits zero.
+
+10. Diagnostics
+    `shm_query` exposes:
+    - region size, mode, permissions, attachment count, destroyed flag
+    - number of waiting readers/writers
+    - mode-specific stats (e.g., ring head/tail, packet counters)
+    Diagnostics read-only operations must not modify shared state or interact with wait queues.
+
+11. Error Handling
+    Documented deterministic errors:
+    OK, INVALID_HANDLE, DESTROYED, NO_PERMISSION, WOULD_BLOCK, TIMEOUT, FULL, EMPTY, NOT_ATTACHED.
+    Every API path must translate internal conditions into these canonical results.
+
+12. Self Tests
+    Integrate optional Kconfig-driven self-tests that verify:
+    - create/destroy, destroy with waiters, cleanup with attachments
+    - attach/detach semantics and permission enforcement
+    - basic, non-blocking, blocking, timed read/write cases
+    - wake-on-destroy behavior and concurrency (multi reader/writer)
+    - raw memory reads/writes, ring buffer full/empty, packet mode boundaries/payload
+    - overflow policies (drop/block)
+    - stress scenarios (rapid attach/detach, create/destroy; heavy concurrent IO)
+
+13. Completion Criteria
+    - Full implementation and docs for public APIs.
+    - Deterministic behavior across region modes with scheduler/timer integration.
+    - Comprehensive diagnostics and Magnolia-compliant sync/wake semantics.
+    - Self-tests pass, no leaks/races, stress behavior reproducible.

@@ -1,3 +1,11 @@
+/*
+ * Magnolia OS — IPC Subsystem
+ * Purpose:
+ *     Scheduler bridge implementation for IPC wait queues.
+ *
+ * © 2025 Magnolia Project
+ */
+
 #include "kernel/core/ipc/ipc_scheduler_bridge.h"
 
 #include "freertos/task.h"
@@ -41,7 +49,8 @@ void ipc_wait_queue_init(ipc_wait_queue_t *queue)
     queue->count = 0;
 }
 
-void ipc_waiter_prepare(ipc_waiter_t *waiter)
+void ipc_waiter_prepare(ipc_waiter_t *waiter,
+                        m_sched_wait_reason_t reason)
 {
     if (waiter == NULL) {
         return;
@@ -50,8 +59,7 @@ void ipc_waiter_prepare(ipc_waiter_t *waiter)
     waiter->prev = NULL;
     waiter->next = NULL;
     waiter->enqueued = false;
-    m_sched_wait_context_prepare_with_reason(&waiter->ctx,
-                                             M_SCHED_WAIT_REASON_IPC);
+    m_sched_wait_context_prepare_with_reason(&waiter->ctx, reason);
 }
 
 void ipc_waiter_enqueue(ipc_wait_queue_t *queue, ipc_waiter_t *waiter)
@@ -131,7 +139,7 @@ ipc_wait_result_t ipc_waiter_block(ipc_waiter_t *waiter,
 }
 
 ipc_wait_result_t ipc_waiter_timed_block(ipc_waiter_t *waiter,
-                                          uint64_t timeout_us)
+                                         uint64_t timeout_us)
 {
     if (waiter == NULL) {
         return IPC_WAIT_RESULT_SHUTDOWN;

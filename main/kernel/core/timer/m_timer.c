@@ -76,7 +76,13 @@ TickType_t m_timer_deadline_to_ticks(const m_timer_deadline_t *deadline)
     }
 
     uint64_t remaining_us = deadline->target - now;
-    uint64_t ticks = (remaining_us + 999ULL) / 1000ULL;
+    uint64_t remaining_ms = (remaining_us + 999ULL) / 1000ULL;
+    uint64_t tick_ms = portTICK_PERIOD_MS;
+    uint64_t ticks = (remaining_ms + tick_ms - 1ULL) / tick_ms;
+
+    if (ticks == 0ULL) {
+        ticks = 1ULL;
+    }
 
     if (ticks >= portMAX_DELAY) {
         return portMAX_DELAY - 1;

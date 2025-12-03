@@ -3,7 +3,9 @@
 #ifdef CONFIG_MAGNOLIA_SCHED_SELFTESTS
 
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "kernel/core/sched/m_sched.h"
 #include "kernel/core/sched/tests/m_sched_tests.h"
@@ -24,14 +26,15 @@ static bool test_report(const char *name, bool success)
 static void sched_worker_lifecycle(void *arg)
 {
     SemaphoreHandle_t done = arg;
-    xSemaphoreGive(done);
+    if (done != NULL) {
+        xSemaphoreGive(done);
+    }
     m_sched_sleep_ms(5);
-    vTaskDelete(NULL);
 }
 
 static bool run_test_create_destroy(void)
 {
-    StaticSemaphore_t storage;
+    static StaticSemaphore_t storage;
     SemaphoreHandle_t done = xSemaphoreCreateBinaryStatic(&storage);
     if (done == NULL) {
         return false;
@@ -64,12 +67,11 @@ static void sched_blocking_worker(void *arg)
 {
     SemaphoreHandle_t trigger = arg;
     xSemaphoreTake(trigger, portMAX_DELAY);
-    vTaskDelete(NULL);
 }
 
 static bool run_test_destroy_waiting(void)
 {
-    StaticSemaphore_t storage;
+    static StaticSemaphore_t storage;
     SemaphoreHandle_t trigger = xSemaphoreCreateBinaryStatic(&storage);
     if (trigger == NULL) {
         return false;

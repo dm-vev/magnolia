@@ -16,6 +16,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "kernel/arch/m_hw_init.h"
+
 static const char *TAG = "arch_esp32s3";
 
 void m_kernel_task_entry(void *arg) {
@@ -37,6 +39,8 @@ void m_kernel_task_entry(void *arg) {
 void m_arch_start(void)
 {
     ESP_LOGI(TAG, "Magnolia ESP32-S3 booting...");
+
+    magnolia_hw_init();
 
 
     xTaskCreatePinnedToCore(

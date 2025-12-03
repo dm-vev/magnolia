@@ -1,11 +1,27 @@
-#include <string.h>
+/*
+ * Magnolia OS — IPC Subsystem
+ * Purpose:
+ *     Handle registry implementation for signals and channels.
+ *
+ * © 2025 Magnolia Project
+ */
 
+#include <string.h>
 #include "kernel/core/ipc/ipc_core.h"
 
 static portMUX_TYPE g_ipc_registry_lock = portMUX_INITIALIZER_UNLOCKED;
 
 static uint16_t g_signal_generations[IPC_MAX_SIGNALS];
 static bool g_signal_alloc[IPC_MAX_SIGNALS];
+
+static uint16_t g_channel_generations[IPC_MAX_CHANNELS];
+static bool g_channel_alloc[IPC_MAX_CHANNELS];
+
+static uint16_t g_event_flags_generations[IPC_MAX_EVENT_FLAGS];
+static bool g_event_flags_alloc[IPC_MAX_EVENT_FLAGS];
+
+static uint16_t g_shm_generations[IPC_MAX_SHM_REGIONS];
+static bool g_shm_alloc[IPC_MAX_SHM_REGIONS];
 
 static ipc_handle_registry_t g_signal_registry = {
     .type = IPC_OBJECT_SIGNAL,
@@ -14,10 +30,37 @@ static ipc_handle_registry_t g_signal_registry = {
     .allocated = g_signal_alloc,
 };
 
+static ipc_handle_registry_t g_channel_registry = {
+    .type = IPC_OBJECT_CHANNEL,
+    .capacity = IPC_MAX_CHANNELS,
+    .generation = g_channel_generations,
+    .allocated = g_channel_alloc,
+};
+
+static ipc_handle_registry_t g_event_flags_registry = {
+    .type = IPC_OBJECT_EVENT_FLAGS,
+    .capacity = IPC_MAX_EVENT_FLAGS,
+    .generation = g_event_flags_generations,
+    .allocated = g_event_flags_alloc,
+};
+
+static ipc_handle_registry_t g_shm_registry = {
+    .type = IPC_OBJECT_SHM_REGION,
+    .capacity = IPC_MAX_SHM_REGIONS,
+    .generation = g_shm_generations,
+    .allocated = g_shm_alloc,
+};
+
 void ipc_core_init(void)
 {
     memset(g_signal_generations, 0, sizeof(g_signal_generations));
     memset(g_signal_alloc, 0, sizeof(g_signal_alloc));
+    memset(g_channel_generations, 0, sizeof(g_channel_generations));
+    memset(g_channel_alloc, 0, sizeof(g_channel_alloc));
+    memset(g_event_flags_generations, 0, sizeof(g_event_flags_generations));
+    memset(g_event_flags_alloc, 0, sizeof(g_event_flags_alloc));
+    memset(g_shm_generations, 0, sizeof(g_shm_generations));
+    memset(g_shm_alloc, 0, sizeof(g_shm_alloc));
 }
 
 ipc_handle_t ipc_handle_make(ipc_object_type_t type,
@@ -106,4 +149,19 @@ void ipc_handle_release(ipc_handle_registry_t *registry, uint16_t index)
 ipc_handle_registry_t *ipc_core_signal_registry(void)
 {
     return &g_signal_registry;
+}
+
+ipc_handle_registry_t *ipc_core_channel_registry(void)
+{
+    return &g_channel_registry;
+}
+
+ipc_handle_registry_t *ipc_core_event_flags_registry(void)
+{
+    return &g_event_flags_registry;
+}
+
+ipc_handle_registry_t *ipc_core_shm_registry(void)
+{
+    return &g_shm_registry;
 }

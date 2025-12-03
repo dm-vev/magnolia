@@ -1,3 +1,11 @@
+/*
+ * Magnolia OS — IPC Subsystem
+ * Purpose:
+ *     Signal primitive self-tests covering semantics, blocking, and diagnostics.
+ *
+ * © 2025 Magnolia Project
+ */
+
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 
@@ -10,6 +18,9 @@
 #include "kernel/core/ipc/ipc.h"
 #include "kernel/core/ipc/ipc_diag.h"
 #include "kernel/core/ipc/tests/ipc_signal_tests.h"
+#include "kernel/core/ipc/tests/ipc_channel_tests.h"
+#include "kernel/core/ipc/tests/ipc_event_flags_tests.h"
+#include "kernel/core/ipc/tests/ipc_shm_tests.h"
 #include "kernel/core/sched/m_sched.h"
 #include "kernel/core/timer/m_timer.h"
 
@@ -35,13 +46,12 @@ static void ipc_signal_wait_worker(void *arg)
 {
     ipc_signal_worker_ctx_t *ctx = arg;
     if (ctx == NULL) {
-        vTaskDelete(NULL);
         return;
     }
 
     ctx->result = ipc_signal_wait(ctx->handle);
     xSemaphoreGive(ctx->done);
-    vTaskDelete(NULL);
+    return;
 }
 
 static bool run_test_create_destroy(void)
@@ -98,7 +108,7 @@ static bool run_test_blocking_wait(void)
         return false;
     }
 
-    StaticSemaphore_t storage;
+    static StaticSemaphore_t storage;
     SemaphoreHandle_t done = xSemaphoreCreateBinaryStatic(&storage);
     if (done == NULL) {
         ipc_signal_destroy(handle);
@@ -166,7 +176,7 @@ static bool run_test_destroy_wakes_waiters(void)
         return false;
     }
 
-    StaticSemaphore_t storage;
+    static StaticSemaphore_t storage;
     SemaphoreHandle_t done = xSemaphoreCreateBinaryStatic(&storage);
     if (done == NULL) {
         ipc_signal_destroy(handle);
@@ -250,6 +260,12 @@ void ipc_selftests_run(void)
                            run_test_destroy_wakes_waiters());
     overall &= test_report("diag information",
                            run_test_diag_info());
+    overall &= test_report("channel self-tests",
+                           ipc_channel_tests_run());
+    overall &= test_report("event flags self-tests",
+                           ipc_event_flags_tests_run());
+    overall &= test_report("shm self-tests",
+                           ipc_shm_tests_run());
     overall &= test_report("invalid handle",
                            run_test_invalid_handle());
 

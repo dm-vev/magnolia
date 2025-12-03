@@ -1,3 +1,11 @@
+#/*
+ * Magnolia OS — IPC Subsystem
+ * Purpose:
+ *     Handle layout, registries, and error definitions shared across primitives.
+ *
+ * © 2025 Magnolia Project
+ */
+
 #ifndef MAGNOLIA_IPC_CORE_H
 #define MAGNOLIA_IPC_CORE_H
 
@@ -37,6 +45,14 @@ typedef uint32_t ipc_handle_t;
 #define IPC_MAX_SIGNALS 8
 
 /**
+ * @brief Maximum number of message channels Magnolia IPC exposes.
+ */
+#define IPC_MAX_CHANNELS 4
+
+#define IPC_MAX_EVENT_FLAGS 8
+#define IPC_MAX_SHM_REGIONS 8
+
+/**
  * @brief Magnolai IPC error codes shared across primitives.
  */
 typedef enum {
@@ -48,6 +64,11 @@ typedef enum {
     IPC_ERR_NOT_READY,
     IPC_ERR_NO_SPACE,
     IPC_ERR_SHUTDOWN,
+    IPC_ERR_WOULD_BLOCK,
+    IPC_ERR_NO_PERMISSION,
+    IPC_ERR_FULL,
+    IPC_ERR_EMPTY,
+    IPC_ERR_NOT_ATTACHED,
 } ipc_error_t;
 
 /**
@@ -56,6 +77,9 @@ typedef enum {
 typedef enum {
     IPC_OBJECT_NONE = 0,
     IPC_OBJECT_SIGNAL = 1,
+    IPC_OBJECT_CHANNEL = 2,
+    IPC_OBJECT_EVENT_FLAGS = 3,
+    IPC_OBJECT_SHM_REGION = 4,
     IPC_OBJECT_TYPE_COUNT,
 } ipc_object_type_t;
 
@@ -95,6 +119,9 @@ ipc_error_t ipc_handle_allocate(ipc_handle_registry_t *registry,
 void ipc_handle_release(ipc_handle_registry_t *registry,
                         uint16_t index);
 ipc_handle_registry_t *ipc_core_signal_registry(void);
+ipc_handle_registry_t *ipc_core_channel_registry(void);
+ipc_handle_registry_t *ipc_core_event_flags_registry(void);
+ipc_handle_registry_t *ipc_core_shm_registry(void);
 
 #ifdef __cplusplus
 }
