@@ -6,14 +6,6 @@ menu "MagnoliaOS Configuration"
         help
             Приоритет корневого процесса в системе.
 
-    config MAGNOLIA_IPC_SELFTESTS
-        bool "Run Magnolia IPC self-tests at boot"
-        default n
-        help
-            Execute Magnolia IPC unit tests during boot to verify basic
-            behavior. Disable for production builds unless regression checks
-            are required.
-
     config MAGNOLIA_SCHED_SELFTESTS
         bool "Run Magnolia scheduler self-tests at boot"
         default n
@@ -22,5 +14,6 @@ menu "MagnoliaOS Configuration"
             validation of the SAL layer.
 
     source "../main/kernel/core/job/Kconfig.job"
+    source "../main/kernel/core/ipc/Kconfig.ipc"
 
 endmenu

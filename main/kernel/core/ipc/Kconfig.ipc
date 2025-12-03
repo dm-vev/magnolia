@@ -1,0 +1,44 @@
+menu "IPC Subsystem"
+
+config MAGNOLIA_IPC_ENABLED
+	bool "Enable Magnolia IPC subsystem"
+	default y
+	help
+		Activate the Magnolia IPC runtime that powers signals, channels, event flags,
+		waitsets, and shared-memory regions. Disable to reduce flash/RAM when only a
+		subset of primitives is needed.
+
+config MAGNOLIA_IPC_DEBUG
+	bool "Enable IPC debug instrumentation"
+	default n
+	depends on MAGNOLIA_IPC_ENABLED
+	help
+		Toggle verbose tracing, assertions, and telemetry hooks for the IPC layer.
+		Useful for debugging but increases code size and runtime overhead.
+
+config MAGNOLIA_IPC_ENABLE_DIAG_DUMP
+	bool "Enable IPC diagnostic dumps"
+	default n
+	depends on MAGNOLIA_IPC_ENABLED
+	help
+		Expose the Magnolia IPC diagnostic interfaces that read internal state
+		into structures and optionally dump matching logs. Disable in space-critical
+		builds.
+
+config MAGNOLIA_IPC_SELFTESTS
+	bool "Run Magnolia IPC self-tests at boot"
+	default n
+	depends on MAGNOLIA_IPC_ENABLED
+	help
+		Execute the Magnolia IPC regression suite during boot to validate signals,
+		channels, event flags, shared memory, and waitset interactions.
+
+if MAGNOLIA_IPC_ENABLED
+	source "Kconfig.ipc_signal"
+	source "Kconfig.ipc_channel"
+	source "Kconfig.ipc_event_flags"
+	source "Kconfig.ipc_waitset"
+	source "Kconfig.ipc_shm"
+endif
+
+endmenu

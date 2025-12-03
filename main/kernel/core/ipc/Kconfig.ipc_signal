@@ -1,0 +1,31 @@
+menu "Signals"
+	depends on MAGNOLIA_IPC_ENABLED
+
+config MAGNOLIA_IPC_SIGNALS_ENABLED
+	bool "Enable IPC signals"
+	default y
+	depends on MAGNOLIA_IPC_ENABLED
+	help
+		Provide counting and one-shot signal objects backed by wait queues.
+		Disabling removes the signal primitive and related waitset support.
+
+config MAGNOLIA_IPC_MAX_SIGNALS
+	int "Maximum signal objects"
+	range 1 32
+	default 8
+	depends on MAGNOLIA_IPC_SIGNALS_ENABLED
+	help
+		Upper bound on the number of simultaneously allocated signal handles
+		Magnolia allows. Raising this improves scalability but increases registry
+		memory and waitset tracking overhead.
+
+config MAGNOLIA_IPC_SIGNAL_DIAGNOSTIC_VERBOSITY
+	int "Signal diagnostic verbosity"
+	range 0 3
+	default 0
+	depends on MAGNOLIA_IPC_SIGNALS_ENABLED
+	help
+		Advanced option. Higher values emit more diagnostics during signal
+		state transitions. Useful for debugging waitset latency and timing issues.
+
+endmenu

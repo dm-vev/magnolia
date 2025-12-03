@@ -1,0 +1,172 @@
+menu "Job Subsystem"
+
+config MAGNOLIA_JOB_ENABLED
+	bool "Enable Magnolia job subsystem"
+	default y
+	help
+		Enable the core job queue, worker, and context primitives used by
+		Magnolia applications. Disabling this removes the entire job stack from
+		the build (including libexec helpers) to reclaim RAM.
+
+config MAGNOLIA_JOB_QUEUE_NAME_MAX_LEN
+	int "Job queue name length"
+	range 8 64
+	default 24
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Length of the static buffer reserved for job queue names. Keeping this
+		small saves BSS; increasing it lets you use longer identifiers without
+		truncation.
+
+config MAGNOLIA_JOB_QUEUE_DEFAULT_CAPACITY
+	int "Default job queue capacity"
+	range 1 256
+	default 8
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Default number of outstanding job handles that can be enqueued before
+		submission blocks. Larger values improve throughput at the cost of RAM.
+
+config MAGNOLIA_JOB_QUEUE_CAPACITY_MAX
+	int "Maximum job queue capacity"
+	range 1 512
+	default 64
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Hard limit enforced by Magnolia to prevent runaway queue growth. It must be
+		greater than or equal to the default capacity and applies to all queues.
+
+config MAGNOLIA_JOB_QUEUE_DEFAULT_WORKER_COUNT
+	int "Default job worker count"
+	range 1 16
+	default 1
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Default number of worker threads assigned to the primary job queue.
+		Fewer workers reduce stack usage, more workers raise concurrency and CPU
+		pressure.
+
+config MAGNOLIA_JOB_QUEUE_WORKER_COUNT_MAX
+	int "Maximum job worker count"
+	range 1 32
+	default 4
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Maximum number of job workers that can be requested when creating a queue.
+		Magnolia validates requests against this upper bound to keep CPU usage
+		predictable.
+
+config MAGNOLIA_JOB_WORKER_STACK_DEPTH
+	int "Job worker stack depth"
+	range 512 16384
+	default CONFIG_FREERTOS_MINIMAL_STACK_SIZE
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Stack reservation used when spawning worker threads. Lower values save memory
+		but require tighter stack analysis; set this to at least
+		CONFIG_FREERTOS_MINIMAL_STACK_SIZE when possible.
+
+config MAGNOLIA_JOB_WORKER_PRIORITY
+	int "Job worker priority"
+	range 1 10
+	default 3
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		FreeRTOS priority assigned to job workers. Increasing it makes jobs more
+		likely to preempt other tasks but raises the risk of starving lower priorities.
+
+config MAGNOLIA_JOB_ENABLE_RESULTS
+	bool "Enable job results"
+	default y
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Store handler results and allow consumers to query job outcomes. Turning
+		this off disables m_job_query_result and related helpers.
+
+config MAGNOLIA_JOB_ENABLE_FUTURES
+	bool "Enable job futures"
+	default y
+	depends on MAGNOLIA_JOB_ENABLED
+	select MAGNOLIA_JOB_ENABLE_RESULTS
+	help
+		Expose future-based wait helpers that rely on IPC wait queues. Disable when
+		only fire-and-forget jobs are required.
+
+config MAGNOLIA_JOB_ENABLE_CANCELLATION
+	bool "Enable job cancellation"
+	default y
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Allow callers to request cancellation of pending work. Turning this off
+		still runs queues but m_job_cancel becomes a no-op.
+
+config MAGNOLIA_JOB_ENABLE_EXTENDED_DIAGNOSTICS
+	bool "Enable extended job diagnostics"
+	default n
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Enable verbose tracing hooks, diagnostic data collection, and queue-level
+		stats updates. This incurs extra CPU and RAM, so disable for tight builds.
+
+config MAGNOLIA_JOB_CTX_FIELD_COUNT
+	int "Job context field count"
+	range 32 32
+	default 32
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Number of job context fields exposed to the scheduler. Advanced option. Do
+		not modify unless you simultaneously adjust the field table.
+
+config MAGNOLIA_JOB_CTX_CWD_MAX_LEN
+	int "Job context path length"
+	range 32 128
+	default 64
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Maximum length of the per-job current working directory string. Larger
+		values can store longer paths but increase the job context size.
+
+config MAGNOLIA_JOB_CTX_ATTR_KEY_MAX_LEN
+	int "Job context attribute key length"
+	range 8 64
+	default 16
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Maximum length for attribute keys stored in job contexts. Each key is
+		stored inline and contributes to heap usage when contexts are allocated.
+
+config MAGNOLIA_JOB_CTX_ATTR_VALUE_MAX_LEN
+	int "Job context attribute value length"
+	range 16 128
+	default 32
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Maximum length for attribute values stored in job contexts.
+
+config MAGNOLIA_JOB_CTX_USER_ATTR_MAX
+	int "Job context user attribute count"
+	range 1 8
+	default 4
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Number of user-defined attribute slots per job context. Each slot stores a
+		key/value pair and increases the size of job contexts.
+
+config MAGNOLIA_JOB_CTX_TLS_SLOT_COUNT
+	int "Job context TLS slot count"
+	range 1 8
+	default 4
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Number of thread-local storage slots available inside job contexts. Use
+		more slots for integrations that attach TLS-state to jobs.
+
+config MAGNOLIA_JOB_SELFTESTS
+	bool "Run Magnolia job subsystem self-tests at boot"
+	default n
+	depends on MAGNOLIA_JOB_ENABLED
+	help
+		Run the Magnolia job subsystem regression suite during boot. Useful for
+		CI runs; disable for production unless tests are required.
+
+endmenu
