@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "esp_heap_caps.h"
+
 void m_arch_task_init_stack(void *stack_top,
                             size_t stack_size,
                             void (*entry)(void *),
@@ -63,4 +65,30 @@ int32_t m_arch_atomic_cmpxchg(volatile int32_t *ptr,
                                 __ATOMIC_SEQ_CST,
                                 __ATOMIC_SEQ_CST);
     return actual;
+}
+
+void *m_arch_malloc(size_t size)
+{
+    if (size == 0) {
+        return NULL;
+    }
+    return heap_caps_malloc(size, MALLOC_CAP_DEFAULT);
+}
+
+void m_arch_free(void *ptr)
+{
+    if (ptr == NULL) {
+        return;
+    }
+    heap_caps_free(ptr);
+}
+
+size_t m_arch_get_free_memory(void)
+{
+    return heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+}
+
+size_t m_arch_get_total_memory(void)
+{
+    return heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
 }

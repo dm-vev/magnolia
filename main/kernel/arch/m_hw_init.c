@@ -9,9 +9,14 @@
 #include "kernel/core/sched/m_sched.h"
 #include "kernel/core/timer/m_timer.h"
 #include "kernel/core/timer/tests/m_timer_tests.h"
+#include "kernel/core/memory/m_alloc.h"
+#if CONFIG_MAGNOLIA_ALLOC_ENABLED && CONFIG_MAGNOLIA_ALLOC_SELFTESTS
+#include "kernel/core/memory/tests/m_alloc_tests.h"
+#endif
 
 void magnolia_hw_init(void)
 {
+    m_alloc_init();
     m_timer_init();
     m_sched_init();
     ipc_init();
@@ -30,5 +35,9 @@ void magnolia_hw_init(void)
 
 #if CONFIG_MAGNOLIA_JOB_ENABLED && CONFIG_MAGNOLIA_JOB_SELFTESTS
     m_job_selftests_run();
+#endif
+
+#if CONFIG_MAGNOLIA_ALLOC_ENABLED && CONFIG_MAGNOLIA_ALLOC_SELFTESTS
+    m_alloc_selftests_run();
 #endif
 }

@@ -3,6 +3,7 @@
  */
 
 #include "kernel/core/job/jctx.h"
+#include "kernel/core/memory/m_alloc.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -394,6 +395,7 @@ void jctx_release(job_ctx_t *ctx)
                 dtors[i](slots[i]);
             }
         }
+        m_alloc_teardown_job_ctx(ctx);
         vPortFree(ctx);
     }
 }

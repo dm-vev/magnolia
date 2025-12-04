@@ -1,0 +1,56 @@
+menu "Magnolia Allocator"
+
+config MAGNOLIA_ALLOC_ENABLED
+    bool "Enable Magnolia allocator"
+    default y
+    depends on MAGNOLIA_JOB_ENABLED
+    help
+        Use Magnolia's allocator stack for userland and kernel allocations. It
+        builds job-aware region heaps on top of platform memory.
+
+config MAGNOLIA_ALLOC_REGION_SIZE
+    int "Region size (bytes)"
+    range 2048 65536
+    default 8192
+    depends on MAGNOLIA_ALLOC_ENABLED
+    help
+        Size of a single PSRAM-backed region. Regions are lazily mapped to jobs
+        and the allocator splits them into individual blocks.
+
+config MAGNOLIA_ALLOC_MAX_REGIONS_PER_JOB
+    int "Max regions per job"
+    range 1 16
+    default 4
+    depends on MAGNOLIA_ALLOC_ENABLED
+    help
+        Hard limit on how many regions may be attached to a single job heap.
+        This bounds the number of raw PSRAM allocations made on behalf of jobs.
+
+config MAGNOLIA_ALLOC_MAX_HEAP_SIZE_PER_JOB
+    int "Max heap bytes per job"
+    range 4096 262144
+    default 65536
+    depends on MAGNOLIA_ALLOC_ENABLED
+    help
+        Maximum total bytes reserved across all regions assigned to a job. If
+        allocations would grow past this limit, Magnolia returns NULL and can
+        cancel the job.
+
+config MAGNOLIA_ALLOC_DEBUG
+    bool "Enable allocator debug tracing"
+    default n
+    depends on MAGNOLIA_ALLOC_ENABLED
+    help
+        Emit debugging traces for malloc/calloc/realloc/free with job IDs and
+        pointer targets. Only useful when investigating allocation problems.
+
+config MAGNOLIA_ALLOC_SELFTESTS
+    bool "Run Magnolia allocator self-tests at boot"
+    default n
+    depends on MAGNOLIA_ALLOC_ENABLED
+    help
+        Execute the Magnolia allocator regression suite during boot. Useful for
+        CI and diagnostics; disable in production unless the extra validation
+        coverage is required.
+
+endmenu

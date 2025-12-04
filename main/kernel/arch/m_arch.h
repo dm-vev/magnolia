@@ -46,6 +46,11 @@ int32_t m_arch_atomic_cmpxchg(volatile int32_t *ptr,
                               int32_t expected,
                               int32_t desired);
 
+void *m_arch_malloc(size_t size);
+void m_arch_free(void *ptr);
+size_t m_arch_get_free_memory(void);
+size_t m_arch_get_total_memory(void);
+
 void m_arch_idle(void);
 void m_arch_wfi(void);
 void m_arch_wfe(void);

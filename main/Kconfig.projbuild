@@ -14,9 +14,10 @@ menu "MagnoliaOS Configuration"
             validation of the SAL layer.
 
     source "../main/kernel/core/sched/Kconfig.sched"
-    source "../main/kernel/core/timer/Kconfig.timer"
+source "../main/kernel/core/timer/Kconfig.timer"
+source "../main/kernel/core/memory/Kconfig.memory"
 
-    source "../main/kernel/core/job/Kconfig.job"
+source "../main/kernel/core/job/Kconfig.job"
     source "../main/kernel/core/ipc/Kconfig.ipc_root"
 
 endmenu

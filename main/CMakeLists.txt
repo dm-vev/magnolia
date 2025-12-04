@@ -85,6 +85,12 @@ if(CONFIG_MAGNOLIA_JOB_ENABLED)
     )
 endif()
 
+if(CONFIG_MAGNOLIA_ALLOC_ENABLED)
+    list(APPEND APP_SRCS
+        "kernel/core/memory/m_alloc.c"
+    )
+endif()
+
 if(CONFIG_MAGNOLIA_IPC_ENABLED)
     list(APPEND APP_SRCS
         "kernel/core/ipc/ipc.c"
@@ -116,6 +122,10 @@ list(APPEND APP_SRCS
 if(CONFIG_MAGNOLIA_JOB_ENABLED AND CONFIG_MAGNOLIA_JOB_SELFTESTS)
     list(APPEND APP_SRCS "kernel/core/job/tests/m_job_tests.c")
 endif()
+
+if(CONFIG_MAGNOLIA_ALLOC_ENABLED AND CONFIG_MAGNOLIA_ALLOC_SELFTESTS)
+    list(APPEND APP_SRCS "kernel/core/memory/tests/m_alloc_tests.c")
+endif()
 idf_component_register(
     SRCS ${APP_SRCS}
     INCLUDE_DIRS
@@ -124,6 +134,7 @@ idf_component_register(
         "kernel/core/sched"
         "kernel/core/job"
         "kernel/core/ipc"
+        "kernel/core/memory"
         "lib"
         "lib/libexec"
 )

@@ -28,6 +28,8 @@ typedef struct {
     job_ctx_tls_destructor_t destructors[JOB_CTX_TLS_SLOT_COUNT];
 } job_ctx_tls_t;
 
+typedef struct m_region_heap m_region_heap_t;
+
 struct job_ctx {
     m_job_id_t job_id;
     m_job_id_t parent_job_id;
@@ -46,6 +48,7 @@ struct job_ctx {
     job_ctx_internal_flags_t internal;
     job_ctx_tls_t tls;
     portMUX_TYPE lock;
+    m_region_heap_t *region_heap;
 };
 
 job_ctx_t *jctx_create(m_job_id_t job_id, m_job_id_t parent_job_id);
