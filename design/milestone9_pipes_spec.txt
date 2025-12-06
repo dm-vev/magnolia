@@ -1,0 +1,97 @@
+Magnolia OS — Milestone 9 design
+==================================
+
+Purpose
+-------
+Extend DevFS with a SHM-backed streaming layer that provides the pipe, TTY,
+and PTY devices described in the milestone request. The implementation
+must coexist with the existing DevFS root tree (null/zero/random) and reuse
+the scheduler wait/wake helpers exposed via `ipc_scheduler_bridge`.
+
+Key components
+--------------
+1. **Streaming backend** (new module under `main/kernel/vfs/fs/devfs` or a shared
+   helper under `kernel/core/ipc`):
+   - Wraps the SHM ring-buffer APIs (`ipc_shm_*`) so DevFS drivers get:
+     * fixed/Kconfig-configurable capacity (via `CONFIG_MAGNOLIA_DEVFS_SHM_BUFFER_SIZE`)
+     * read/write helpers returning `M_VFS_ERR_WOULD_BLOCK` when empty/full
+     * timed/non-blocking variants driven by the current DevFS/file wait queues
+   - Maintains atomic head/tail bookkeeping and tracks reader/writer waiters via
+     `ipc_wait_queue_t` so piped devices can wake the next waiter in FIFO order.
+   - Calls `devfs_notify(node, mask)` whenever a readiness state changes.
+   - Reports diagnostics (buffer occupancy, waiter counts) so DevFS diag can
+     surface the required stats.
+
+2. **Pipe driver (`/dev/pipeX`)**:
+   - One-way FIFO with separate reader/writer semantics.
+   - Attaches to the streaming backend with two SHM attachments (read-only for
+     readers, write-only for writers) so we can re-use the same ring buffer.
+   - Supports blocking, non-blocking, and timed I/O by bridging from
+     `m_vfs_file_wait`/`m_vfs_file_wake`.
+   - Implements ioctl requests (e.g., `PIPE_RESET`, `PIPE_GET_STATS`) and poll
+     semantics (`DEVFS_EVENT_READABLE | DEVFS_EVENT_WRITABLE`) using the
+     backend readiness mask.
+   - Tracks diagnostics (usage, waiters) so DevFS diag can report them.
+
+3. **TTY driver (`/dev/ttyX`)**:
+   - Uses the streaming backend for output (write) and input (read), but also
+     maintains per-tty line buffers for canonical mode in RAM.
+   - Configurable defaults for echo (`CONFIG_MAGNOLIA_DEVFS_TTY_ECHO`)
+     and canonical mode (`CONFIG_MAGNOLIA_DEVFS_TTY_CANON`), plus line buffer
+     length (`CONFIG_MAGNOLIA_DEVFS_TTY_LINE_BUFFER_SIZE`).
+   - Handles special characters in canonical mode: newline normalization,
+     backspace editing, Ctrl+D for EOF.
+   - Exposes ioctl commands (`TTY_SET_/GET_MODE`, `TTY_FLUSH`, `TTY_SET/GET_ECHO`,
+     `TTY_SET/GET_CANON`) to switch between raw/canonical and toggle echo.
+   - Echoes typed bytes back to the writer ring buffer immediately (when echo
+     enabled) and interfaces with line discipline to flush complete lines.
+
+4. **PTY driver** (`/dev/pty/masterX`, `/dev/pty/slaveX`):
+   - Each pair uses two streaming channel instances (one for master→slave, one
+     for slave→master). The slave side runs the TTY discipline, while the
+     master side simply exposes raw byte transport.
+   - Closing either endpoint should signal hangup to the other (`IPC_ERR_OBJECT_DESTROYED`
+     or a dedicated hangup mask) and trigger `devfs_notify` so waiters unpark.
+   - Diagnostics expose the master↔slave mapping plus their mode (echo/canon).
+   - Live bookkeeping ensures only `CONFIG_MAGNOLIA_DEVFS_PTY_COUNT` pairs exist.
+
+5. **DevFS integration**:
+   - Register devices using `devfs_register` in `m_devfs_register_default_devices()`
+     or a dedicated initialization path when the Kconfig option is enabled.
+   - Extend `devfs_get_info` callbacks to expose streaming stats, waiters, and
+     SHM occupancy for each pipe/tty/pty.
+   - Extend diagnostic helpers (`devfs_diag_device_iterate`, `devfs_diag_shm_info`)
+     to include streaming backend state plus TTY/PTY modes and the last
+     notify events.
+   - DevFS notify logic ensures `DEVFS_EVENT_READABLE`/`WRITABLE` masks match
+     the streaming backend state.
+
+6. **Kconfig and build**:
+   - Introduce options under `main/Kconfig.projbuild` or the relevant Kconfig
+     fragments:
+     * `CONFIG_MAGNOLIA_DEVFS_PIPES` / `_COUNT`
+     * `CONFIG_MAGNOLIA_DEVFS_TTY` / `_COUNT`
+     * `CONFIG_MAGNOLIA_DEVFS_PTY` / `_COUNT`
+     * `CONFIG_MAGNOLIA_DEVFS_SHM_BUFFER_SIZE`
+     * `CONFIG_MAGNOLIA_DEVFS_TTY_LINE_BUFFER_SIZE`
+     * Optional defaults (`TTY_ECHO`, `TTY_CANON`, `TTY_DEBUG`)
+   - Gate code compilation using these macros so the streaming layer is only
+     built when requested.
+
+7. **Testing**:
+   - Extend `main/kernel/vfs/fs/devfs/devfs_tests.c` with new test suites covering:
+     * Pipe send/receive, blocking/timed semantics, multi-reader/writer stress.
+     * TTY canonical/raw modes, echo handling, newline/backspace/EOF behavior.
+     * PTY master/slave messaging, lifecycle hangups, mode propagation.
+     * Integration cases with concurrent pipes/tty/pty and nested job I/O.
+   - Add diagnostics tests to ensure waiter counts, notify events, and SHM buffer
+     info reflect streaming activity.
+
+8. **Next steps**:
+   - Define concrete data structures for streaming devices (`stream_node_t`,
+     `tty_mode_t`, `pty_pair_t`) in new `.c/.h` files inside `main/kernel/vfs/fs/devfs`.
+   - Implement the SHM backend helpers that wrap `ipc_shm` and maintain ready
+     masks plus waiter queues.
+   - Wire DevFS device registration and diag updates so the new nodes appear
+     under `/dev` and their events get reported.
+   - Create tests and diagnostics to hit each of the requirements mentioned above.

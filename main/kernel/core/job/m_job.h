@@ -8,6 +8,7 @@
 
 #include "sdkconfig.h"
 #include "kernel/core/job/m_job_core.h"
+#include "kernel/core/job/m_job_event.h"
 #include "kernel/core/job/m_job_queue.h"
 #include "kernel/core/job/m_job_result.h"
 #include "kernel/core/job/m_job_future.h"

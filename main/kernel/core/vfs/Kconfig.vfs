@@ -1,0 +1,253 @@
+menu "Magnolia Virtual Filesystem"
+
+config MAGNOLIA_VFS_ENABLED
+    bool "Enable Magnolia VFS"
+    default y
+    depends on MAGNOLIA_JOB_ENABLED
+    help
+        Build the Magnolia virtual filesystem core that coordinates filesystem
+        drivers, per-job FD tables, and path resolution. The job subsystem must
+        be enabled because FD tables and diagnostics attach to job lifecycles.
+
+config MAGNOLIA_VFS_NODE_LIFETIME_CHECK
+    bool "Enable VFS node lifetime diagnostics"
+    default n
+    depends on MAGNOLIA_VFS_ENABLED
+    help
+        Track and report vnode reference-count anomalies such as double-free,
+        late releases, or leaked nodes. This lights up additional instrumentation
+        useful during development, but adds logging and a small atomic counter
+        to the VFS core.
+
+config MAGNOLIA_VFS_MAX_FS_TYPES
+    int "Maximum filesystem types"
+    range 1 16
+    default 8
+    depends on MAGNOLIA_VFS_ENABLED
+    help
+        How many filesystem drivers may register with the VFS. Keep this small
+        while the stack is under development and grow it later when more
+        drivers are added.
+
+config MAGNOLIA_VFS_MAX_MOUNTS
+    int "Maximum mountpoints"
+    range 1 16
+    default 8
+    depends on MAGNOLIA_VFS_ENABLED
+    help
+        Cap on simultaneously mounted filesystems tracked by the Magnolia VFS
+        registry. Increasing this consumes more bookkeeping RAM, so keep it
+        tight until mounted filesystems are actually used.
+
+config MAGNOLIA_VFS_MOUNT_OVERLAYS
+    bool "Allow mount overlays"
+    default y
+    depends on MAGNOLIA_VFS_ENABLED
+    help
+        Permit multiple filesystems to be mounted at the same mountpoint.
+        New mounts shadow older ones, enabling overlay and layered filesystem
+        setups that are resolved by the VFS resolver.
+
+config MAGNOLIA_VFS_MAX_OPEN_FILES_PER_JOB
+    int "Max open files per job"
+    range 1 64
+    default 16
+    depends on MAGNOLIA_VFS_ENABLED
+    help
+        Limits the number of FDs a Magnolia job may open at once. Sets the size
+        of the job-local FD table and bounds per-job memory usage.
+
+config MAGNOLIA_VFS_MAX_OPEN_FILES_GLOBAL
+    int "Kernel-global FD capacity"
+    range 1 64
+    default 16
+    depends on MAGNOLIA_VFS_ENABLED
+    help
+        Maximum number of global FDs that kernel contexts may take (job is
+        NULL). This guards the kernel FD table used for drivers that operate
+        outside of job contexts.
+
+config MAGNOLIA_VFS_FD_LOGGING
+    bool "Enable VFS FD table logging"
+    default n
+    depends on MAGNOLIA_VFS_ENABLED
+    help
+        Log job/kernel FD allocations, releases, and explicit assignments for
+        stronger diagnostics during debugging runs. This pulls in the ESP log
+        subsystem and should only be used in traced configurations.
+
+config MAGNOLIA_VFS_DEVFS
+    bool "Enable DevFS device filesystem"
+    default y
+    depends on MAGNOLIA_VFS_ENABLED
+    help
+        Mount the virtual /dev filesystem so device drivers can register
+        device nodes through the unified VFS driver model. All IO travels
+        through VFS → DevFS → device_ops with no filesystem-specific logic
+        embedded directly in the VFS core.
+
+config MAGNOLIA_DEVFS_MAX_DEVICES
+    int "Maximum DevFS devices"
+    range 1 64
+    default 16
+    depends on MAGNOLIA_VFS_DEVFS
+    help
+        Cap the number of device nodes that may simultaneously exist in DevFS.
+        Once this limit is reached, devfs_register rejects further devices until
+        others are unregistered.
+
+config MAGNOLIA_DEVFS_SELFTESTS
+    bool "Enable DevFS self-tests"
+    default n
+    depends on MAGNOLIA_VFS_DEVFS
+    help
+        Build the DevFS self-tests that mount /dev, check /dev/null, /dev/zero,
+        /dev/random, and validate basic open/read/write/readdir paths through
+        the Magnolia VFS.
+
+config MAGNOLIA_VFS_MAX_PATH_LEN
+    int "Maximum path length"
+    range 32 1024
+    default 256
+    depends on MAGNOLIA_VFS_ENABLED
+    help
+        Upper bound on path buffer lengths allocated by the VFS path helpers.
+        Larger values allow longer paths but increase stack/heap usage in
+        normalization helpers.
+
+config MAGNOLIA_RAMFS_ENABLED
+    bool "Enable RAMFS reference filesystem"
+    default y
+    depends on MAGNOLIA_VFS_ENABLED
+    help
+        Mount Magnolia's in-memory RAMFS implementation that acts as the first
+        reference filesystem for the virtual filesystem core.
+
+config MAGNOLIA_RAMFS_MAX_NODES
+    int "Maximum RAMFS nodes"
+    range 16 1024
+    default 256
+    depends on MAGNOLIA_RAMFS_ENABLED
+    help
+        Cap the number of RAMFS nodes (files + directories) that can coexist.
+        Once this limit is reached, RAMFS rejects new creates until nodes are
+        deleted.
+
+config MAGNOLIA_VFS_FORCE_UNMOUNT
+    bool "Enable forced unmount API"
+    default y
+    depends on MAGNOLIA_VFS_ENABLED
+    help
+        Allow the kernel to forcibly tear down mountpoints even if there are
+        dangling nodes. This should only be enabled for recovery tooling or
+        debug builds because it can break driver assumptions about node
+        lifetimes.
+
+config MAGNOLIA_VFS_READ_CACHE
+    bool "Enable read cache for VFS"
+    default y
+    depends on MAGNOLIA_VFS_ENABLED
+    help
+        Cache read() blocks in the VFS core so repeated small reads from device
+        files do not re-hit the drivers. The cache transparently buffers fixed-
+        size blocks, maintains an LRU eviction order, and can be flushed through
+        diagnostics. RAMFS bypasses the cache because it already lives in RAM.
+
+config MAGNOLIA_VFS_READ_CACHE_SIZE
+    int "Read cache block count"
+    range 1 64
+    default 8
+    depends on MAGNOLIA_VFS_READ_CACHE
+    help
+        Number of blocks retained by the read cache. Each block is 512 bytes,
+        so increasing this value raises the total cache footprint. Clearing the
+        cache flushes all blocks and updates the hit/miss diagnostics.
+
+config MAGNOLIA_VFS_SELFTESTS
+    bool "Enable VFS regression self-tests"
+    default n
+    depends on MAGNOLIA_VFS_ENABLED
+    help
+        Run the Magnolia VFS regression suite (resolver edge cases, errno
+        counters, read-cache stats, FD/dup semantics, metadata coverage) during
+        initialization so the core is sanity-checked before real workloads.
+
+config MAGNOLIA_LITTLEFS_ENABLED
+    bool "Enable LittleFS driver"
+    default y
+    depends on MAGNOLIA_VFS_ENABLED
+    help
+        Include Magnolia's LittleFS adapter so SPI-Flash backed storage can be
+        mounted through the Magnolia VFS. The driver is purely in-memory and
+        uses the bundled LittleFS source to expose a Copy-On-Write filesystem.
+
+config MAGNOLIA_LITTLEFS_BLOCK_SIZE
+    int "Logical block size"
+    range 256 4096
+    default 512
+    depends on MAGNOLIA_LITTLEFS_ENABLED
+    help
+        Size of a logical block that LittleFS will manage. Must divide the
+        actual flash erase size and is used for calculating the total storage
+        footprint.
+
+config MAGNOLIA_LITTLEFS_BLOCK_COUNT
+    int "Block count"
+    range 8 2048
+    default 256
+    depends on MAGNOLIA_LITTLEFS_ENABLED
+    help
+        Total number of erasable blocks exposed to LittleFS. Combined with the
+        block size this defines how much backing storage an instance consumes.
+
+config MAGNOLIA_LITTLEFS_READ_SIZE
+    int "Read size"
+    range 16 512
+    default 128
+    depends on MAGNOLIA_LITTLEFS_ENABLED
+
+config MAGNOLIA_LITTLEFS_PROG_SIZE
+    int "Program size"
+    range 16 512
+    default 128
+    depends on MAGNOLIA_LITTLEFS_ENABLED
+
+config MAGNOLIA_LITTLEFS_CACHE_SIZE
+    int "Cache size"
+    range 64 2048
+    default 512
+    depends on MAGNOLIA_LITTLEFS_ENABLED
+
+config MAGNOLIA_LITTLEFS_LOOKAHEAD_SIZE
+    int "Lookahead buffer size"
+    range 8 256
+    default 64
+    depends on MAGNOLIA_LITTLEFS_ENABLED
+
+config MAGNOLIA_LITTLEFS_BLOCK_CYCLES
+    int "Block cycles"
+    range -1 2000
+    default 128
+    depends on MAGNOLIA_LITTLEFS_ENABLED
+    help
+        Number of erase cycles before LittleFS evicts metadata to achieve
+        wear-leveling. Set to -1 to disable wear-leveling.
+
+config MAGNOLIA_LITTLEFS_ERASE_BLOCKS
+    int "Erase blocks per operation"
+    range 1 16
+    default 4
+    depends on MAGNOLIA_LITTLEFS_ENABLED
+    help
+        Number of blocks that will be erased during each backend erase call.
+        The backend currently erases a single logical block at a time.
+
+config MAGNOLIA_VFS_LITTLEFS_SELFTESTS
+    bool "Enable LittleFS selftests"
+    default n
+    depends on MAGNOLIA_LITTLEFS_ENABLED
+    help
+        Build the LittleFS self-tests that exercise mounting, formatting, and
+        IO operations through the Magnolia VFS layer.
+
+endmenu

@@ -606,6 +606,10 @@ void *m_job_realloc(job_ctx_t *ctx, void *ptr, size_t new_size)
         m_alloc_report_error(target, "realloc pointer mismatch", ptr);
         return NULL;
     }
+    if (!block->allocated) {
+        m_alloc_report_error(target, "realloc after free", ptr);
+        return NULL;
+    }
 
     if (new_size <= block->size) {
         return ptr;

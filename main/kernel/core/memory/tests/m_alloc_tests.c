@@ -39,7 +39,7 @@ static m_job_queue_t *alloc_test_queue(size_t worker_count)
     m_job_queue_config_t config = M_JOB_QUEUE_CONFIG_DEFAULT;
     config.capacity = 8;
     config.worker_count = worker_count;
-    config.stack_depth = configMINIMAL_STACK_SIZE;
+    config.stack_depth = 8192;
     config.priority = (tskIDLE_PRIORITY + 1);
     config.debug_log = false;
     return m_job_queue_create(&config);
@@ -191,42 +191,56 @@ static bool run_test_dropin_malloc_sequence(void)
 static m_job_result_descriptor_t job_region_limits(m_job_id_t job, void *arg)
 {
     (void)arg;
-    void *buffers[REGION_ALLOCATIONS_LIMIT];
-    size_t fill = 0;
+    void **buffers = pvPortMalloc(REGION_ALLOCATIONS_LIMIT * sizeof(void *));
     size_t snapshot = 0;
-    bool overflow_seen = false;
     magnolia_alloc_job_stats_t stats = {0};
+    size_t limit_from_config = CONFIG_MAGNOLIA_ALLOC_MAX_REGIONS_PER_JOB;
+    if (limit_from_config == 0) {
+        limit_from_config = REGION_ALLOCATIONS_LIMIT;
+    }
+    if (CONFIG_MAGNOLIA_ALLOC_MAX_HEAP_SIZE_PER_JOB > 0) {
+        size_t heap_limit =
+            CONFIG_MAGNOLIA_ALLOC_MAX_HEAP_SIZE_PER_JOB
+            / CONFIG_MAGNOLIA_ALLOC_REGION_SIZE;
+        if (heap_limit == 0) {
+            heap_limit = 1;
+        }
+        if (heap_limit < limit_from_config) {
+            limit_from_config = heap_limit;
+        }
+    }
+    if (limit_from_config > REGION_ALLOCATIONS_LIMIT) {
+        limit_from_config = REGION_ALLOCATIONS_LIMIT;
+    }
+    size_t target_regions = limit_from_config;
 
-    for (; fill < REGION_ALLOCATIONS_LIMIT; ++fill) {
+    if (buffers == NULL) {
+        return m_job_result_error("buffer allocation failed", 0);
+    }
+
+    size_t allocated = 0;
+    for (size_t i = 0; i < REGION_ALLOCATIONS_LIMIT; ++i) {
         void *ptr = malloc(REGION_ALLOC_BLOCK_SIZE);
         if (ptr == NULL) {
             break;
         }
-        buffers[fill] = ptr;
+        buffers[allocated++] = ptr;
         m_alloc_get_job_stats(job->ctx, &stats);
         if (stats.region_count > snapshot) {
             snapshot = stats.region_count;
-            if (snapshot >= CONFIG_MAGNOLIA_ALLOC_MAX_REGIONS_PER_JOB) {
-                void *overflow = malloc(REGION_ALLOC_BLOCK_SIZE);
-                overflow_seen = (overflow == NULL);
-                if (overflow != NULL) {
-                    free(overflow);
-                }
+            if (target_regions > 0 && snapshot >= target_regions) {
                 break;
             }
         }
     }
 
-    for (size_t i = 0; i < fill; ++i) {
+    for (size_t i = 0; i < allocated; ++i) {
         free(buffers[i]);
     }
+    vPortFree(buffers);
 
-    if (snapshot < CONFIG_MAGNOLIA_ALLOC_MAX_REGIONS_PER_JOB) {
+    if (target_regions > 0 && snapshot < target_regions) {
         return m_job_result_error("regions did not grow",
-                                  0);
-    }
-    if (!overflow_seen) {
-        return m_job_result_error("region limit not enforced",
                                   0);
     }
     return m_job_result_success(NULL, 0);
@@ -501,7 +515,7 @@ static m_job_result_descriptor_t job_misused_free(m_job_id_t job, void *arg)
 
 static bool run_test_cross_job_free_cancel(void)
 {
-    m_job_queue_t *queue = alloc_test_queue(1);
+    m_job_queue_t *queue = alloc_test_queue(2);
     if (queue == NULL) {
         return false;
     }

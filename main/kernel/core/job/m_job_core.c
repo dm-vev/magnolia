@@ -10,6 +10,7 @@
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "kernel/core/job/m_job_core.h"
+#include "kernel/core/job/m_job_event.h"
 #include "kernel/core/job/jctx.h"
 #include "kernel/core/timer/m_timer.h"
 
@@ -125,6 +126,7 @@ m_job_error_t m_job_handle_destroy(m_job_id_t job)
     }
     job->destroyed = true;
     portEXIT_CRITICAL(&job->lock);
+    _m_job_notify_destroyed(job);
     if (job->ctx != NULL) {
         jctx_release(job->ctx);
         job->ctx = NULL;

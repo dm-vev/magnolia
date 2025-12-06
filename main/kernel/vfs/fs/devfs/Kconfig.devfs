@@ -1,0 +1,83 @@
+menu "DevFS streaming devices"
+
+config MAGNOLIA_DEVFS_PIPES
+    bool "Enable DevFS pipe devices"
+    default y
+    depends on MAGNOLIA_VFS_DEVFS
+    help
+        Build the /dev/pipeX family that exposes unidirectional FIFO streams
+        backed by shared memory and scheduler wait/wake mechanisms.
+
+config MAGNOLIA_DEVFS_PIPE_COUNT
+    int "Number of pipe instances"
+    range 1 16
+    default 4
+    depends on MAGNOLIA_DEVFS_PIPES
+    help
+        Maximum number of /dev/pipeX nodes that may be registered at once.
+
+config MAGNOLIA_DEVFS_TTY
+    bool "Enable DevFS TTY devices"
+    default y
+    depends on MAGNOLIA_VFS_DEVFS
+    help
+        Build the /dev/ttyX nodes that layer canonical/raw line discipline on top
+        of the SHM streaming backend.
+
+config MAGNOLIA_DEVFS_TTY_COUNT
+    int "TTY count"
+    range 1 8
+    default 2
+    depends on MAGNOLIA_DEVFS_TTY
+    help
+        Controls how many /dev/ttyX nodes are created.
+
+config MAGNOLIA_DEVFS_TTY_LINE_BUFFER_SIZE
+    int "TTY line buffer length"
+    range 32 1024
+    default 256
+    depends on MAGNOLIA_DEVFS_TTY
+    help
+        Length of the canonical mode line buffer used for editing input before
+        dispatching complete lines.
+
+config MAGNOLIA_DEVFS_TTY_ECHO
+    bool "Default TTY echo mode"
+    default y
+    depends on MAGNOLIA_DEVFS_TTY
+
+config MAGNOLIA_DEVFS_TTY_CANON
+    bool "Default TTY canonical mode"
+    default y
+    depends on MAGNOLIA_DEVFS_TTY
+
+config MAGNOLIA_DEVFS_TTY_DEBUG
+    bool "Enable TTY debug diagnostics"
+    default n
+    depends on MAGNOLIA_DEVFS_TTY
+
+config MAGNOLIA_DEVFS_PTY
+    bool "Enable DevFS pseudo-terminals"
+    default y
+    depends on MAGNOLIA_VFS_DEVFS
+    help
+        Build /dev/pty/masterX and /dev/pty/slaveX pairs that expose
+        bidirectional streaming between masters and slaves.
+
+config MAGNOLIA_DEVFS_PTY_COUNT
+    int "PTY pair count"
+    range 1 8
+    default 3
+    depends on MAGNOLIA_DEVFS_PTY
+    help
+        Maximum number of pseudo-terminal pairs (master + slave) that can be allocated.
+
+config MAGNOLIA_DEVFS_SHM_BUFFER_SIZE
+    int "DevFS streaming buffer size"
+    range 64 16384
+    default 512
+    depends on MAGNOLIA_VFS_DEVFS
+    help
+        Size of the shared ring buffer used by pipes, TTY, and PTY devices.
+
+endmenu

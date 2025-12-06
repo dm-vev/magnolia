@@ -21,6 +21,8 @@ static m_sched_wait_result_t ipc_bridge_map_to_sched(ipc_wait_result_t result)
         return M_SCHED_WAIT_RESULT_TIMEOUT;
     case IPC_WAIT_RESULT_OBJECT_DESTROYED:
         return M_SCHED_WAIT_RESULT_OBJECT_DESTROYED;
+    case IPC_WAIT_RESULT_DEVICE_REMOVED:
+        return M_SCHED_WAIT_RESULT_DEVICE_REMOVED;
     default:
         return M_SCHED_WAIT_RESULT_SHUTDOWN;
     }
@@ -35,6 +37,8 @@ static ipc_wait_result_t ipc_bridge_map_from_sched(m_sched_wait_result_t result)
         return IPC_WAIT_RESULT_TIMEOUT;
     case M_SCHED_WAIT_RESULT_OBJECT_DESTROYED:
         return IPC_WAIT_RESULT_OBJECT_DESTROYED;
+    case M_SCHED_WAIT_RESULT_DEVICE_REMOVED:
+        return IPC_WAIT_RESULT_DEVICE_REMOVED;
     default:
         return IPC_WAIT_RESULT_SHUTDOWN;
     }

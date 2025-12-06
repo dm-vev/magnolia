@@ -10,6 +10,9 @@
 #include "kernel/core/timer/m_timer.h"
 #include "kernel/core/timer/tests/m_timer_tests.h"
 #include "kernel/core/memory/m_alloc.h"
+#if CONFIG_MAGNOLIA_VFS_DEVFS && CONFIG_MAGNOLIA_DEVFS_SELFTESTS
+#include "kernel/vfs/fs/devfs/devfs_tests.h"
+#endif
 #if CONFIG_MAGNOLIA_ALLOC_ENABLED && CONFIG_MAGNOLIA_ALLOC_SELFTESTS
 #include "kernel/core/memory/tests/m_alloc_tests.h"
 #endif
@@ -39,5 +42,9 @@ void magnolia_hw_init(void)
 
 #if CONFIG_MAGNOLIA_ALLOC_ENABLED && CONFIG_MAGNOLIA_ALLOC_SELFTESTS
     m_alloc_selftests_run();
+#endif
+
+#if CONFIG_MAGNOLIA_VFS_DEVFS && CONFIG_MAGNOLIA_DEVFS_SELFTESTS
+    devfs_selftests_run();
 #endif
 }

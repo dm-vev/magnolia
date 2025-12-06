@@ -81,8 +81,52 @@ if(CONFIG_MAGNOLIA_JOB_ENABLED)
         "kernel/core/job/m_job_wait.c"
         "kernel/core/job/m_job_diag.c"
         "kernel/core/job/jctx.c"
+        "kernel/core/job/m_job_event.c"
         "lib/libexec/job_ctx.c"
     )
+endif()
+
+if(CONFIG_MAGNOLIA_VFS_ENABLED)
+    list(APPEND APP_SRCS
+        "kernel/core/vfs/core/m_vfs_registry.c"
+        "kernel/core/vfs/core/m_vfs_jobcwd.c"
+        "kernel/core/vfs/core/m_vfs_object.c"
+        "kernel/core/vfs/core/m_vfs_core.c"
+        "kernel/core/vfs/cache/m_vfs_read_cache.c"
+        "kernel/core/vfs/core/m_vfs_test.c"
+        "kernel/core/vfs/core/m_vfs_errno.c"
+        "kernel/core/vfs/path/m_vfs_path.c"
+        "kernel/core/vfs/fd/m_vfs_fd.c"
+        "kernel/core/vfs/diag/m_vfs_diag.c"
+    )
+    if(CONFIG_MAGNOLIA_VFS_SELFTESTS)
+        list(APPEND APP_SRCS "kernel/core/vfs/core/m_vfs_selftests.c")
+    endif()
+    if(CONFIG_MAGNOLIA_RAMFS_ENABLED)
+        list(APPEND APP_SRCS
+            "kernel/core/vfs/ramfs/ramfs.c"
+        )
+    endif()
+    if(CONFIG_MAGNOLIA_VFS_DEVFS)
+        list(APPEND APP_SRCS
+            "kernel/vfs/fs/devfs/devfs.c"
+            "kernel/vfs/fs/devfs/devfs_stream.c"
+            "kernel/vfs/fs/devfs/devfs_stream_devices.c"
+        )
+        if(CONFIG_MAGNOLIA_DEVFS_SELFTESTS)
+            list(APPEND APP_SRCS
+                "kernel/vfs/fs/devfs/devfs_tests.c"
+            )
+        endif()
+    endif()
+    if(CONFIG_MAGNOLIA_LITTLEFS_ENABLED)
+        list(APPEND APP_SRCS
+            "kernel/vfs/fs/littlefs/lfs.c"
+            "kernel/vfs/fs/littlefs/lfs_util.c"
+            "kernel/vfs/fs/littlefs/littlefs_fs.c"
+            "kernel/vfs/fs/littlefs/lfs_backend_flash.c"
+        )
+    endif()
 endif()
 
 if(CONFIG_MAGNOLIA_ALLOC_ENABLED)
@@ -135,6 +179,8 @@ idf_component_register(
         "kernel/core/job"
         "kernel/core/ipc"
         "kernel/core/memory"
+        "kernel/core/vfs"
+        "kernel/vfs"
         "lib"
         "lib/libexec"
 )
