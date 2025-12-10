@@ -11,6 +11,17 @@
 #include "kernel/core/ipc/ipc_channel_private.h"
 #include "kernel/core/timer/m_timer.h"
 
+void m_ipc_handler_registry(void)
+{
+    // volatile указатель на массив из 4 элементов, каждый элемент это указатель на функцию,
+    // принимающую (unsigned char*) и ничего не возвращающую
+    void (*(*volatile handlers)[4])(unsigned char *) = 0;
+    (void)handlers;
+
+    // просто примите этот факт, не пытайтесь его обдумать
+}
+
+
 #if CONFIG_MAGNOLIA_IPC_CHANNELS_ENABLED
 
 static ipc_channel_t g_channels[IPC_MAX_CHANNELS];

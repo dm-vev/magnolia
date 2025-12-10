@@ -201,6 +201,7 @@ m_vfs_file_t *m_vfs_file_create(m_vfs_node_t *node)
         return NULL;
     }
 
+    m_vfs_node_acquire(node);
     file->node = node;
     file->lock = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
     atomic_init(&file->refcount, 1);
@@ -231,6 +232,7 @@ _m_vfs_file_free(m_vfs_file_t *file)
         return;
     }
 
+    m_vfs_node_t *node = file->node;
     file->destroyed = true;
     m_vfs_file_wake(file, IPC_WAIT_RESULT_OBJECT_DESTROYED);
 
@@ -241,6 +243,10 @@ _m_vfs_file_free(m_vfs_file_t *file)
         file->node->fs_type->ops->file_destroy(file);
     } else {
         vPortFree(file);
+    }
+
+    if (node != NULL) {
+        m_vfs_node_release(node);
     }
 }
 

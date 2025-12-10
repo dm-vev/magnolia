@@ -11,8 +11,8 @@ config MAGNOLIA_IPC_SHM_ENABLED
 
 config MAGNOLIA_IPC_MAX_SHM_REGIONS
 	int "Maximum shared memory regions"
-	range 1 16
-	default 8
+	range 1 32
+	default 16
 	depends on MAGNOLIA_IPC_SHM_ENABLED
 	help
 		Controls how many shared memory regions may coexist. Larger values improve
