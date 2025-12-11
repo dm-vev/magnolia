@@ -610,13 +610,11 @@ cleanup_namespace:
 static bool
 run_test_devfs_pipe_basic(void)
 {
-    ESP_LOGI(TAG, "pipe basic: starting");
     if (m_vfs_init() != M_VFS_ERR_OK) {
         return false;
     }
 
     bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
-    ESP_LOGI(TAG, "pipe basic: mount %s", mounted ? "ok" : "fail");
     if (!mounted) {
         return false;
     }
@@ -632,15 +630,12 @@ run_test_devfs_pipe_basic(void)
         ok = false;
         goto cleanup_pipe;
     }
-    ESP_LOGI(TAG, "pipe basic: opened /dev/pipe0");
 
     ok &= (m_vfs_write(NULL, fd, payload, sizeof(payload) - 1, &written) == M_VFS_ERR_OK);
     ok &= (written == sizeof(payload) - 1);
-    ESP_LOGI(TAG, "pipe basic: wrote %u bytes", (unsigned)written);
-    ok &= (m_vfs_read(NULL, fd, sink, sizeof(sink), &read) == M_VFS_ERR_OK);
+    ok &= (m_vfs_read(NULL, fd, sink, sizeof(payload) - 1, &read) == M_VFS_ERR_OK);
     ok &= (read == sizeof(payload) - 1);
     ok &= (memcmp(sink, payload, read) == 0);
-    ESP_LOGI(TAG, "pipe basic: read %u bytes", (unsigned)read);
 
 cleanup_pipe:
     if (fd >= 0) {
@@ -682,7 +677,7 @@ run_test_devfs_tty_canonical(void)
 
     ok &= (m_vfs_write(NULL, fd, payload, sizeof(payload) - 1, &written) == M_VFS_ERR_OK);
     ok &= (written == sizeof(payload) - 1);
-    ok &= (m_vfs_read(NULL, fd, sink, sizeof(sink), &read) == M_VFS_ERR_OK);
+    ok &= (m_vfs_read(NULL, fd, sink, sizeof(expected) - 1, &read) == M_VFS_ERR_OK);
     ok &= (read == sizeof(expected) - 1);
     ok &= (memcmp(sink, expected, read) == 0);
 
@@ -695,7 +690,7 @@ run_test_devfs_tty_canonical(void)
     ok &= (m_vfs_ioctl(NULL, fd, DEVFS_IOCTL_TTY_SET_CANON, &canon) == M_VFS_ERR_OK);
     const char raw[] = "raw-input";
     ok &= (m_vfs_write(NULL, fd, raw, sizeof(raw) - 1, &written) == M_VFS_ERR_OK);
-    ok &= (m_vfs_read(NULL, fd, sink, sizeof(sink), &read) == M_VFS_ERR_OK);
+    ok &= (m_vfs_read(NULL, fd, sink, sizeof(raw) - 1, &read) == M_VFS_ERR_OK);
     ok &= (read == sizeof(raw) - 1);
     ok &= (memcmp(sink, raw, read) == 0);
 
@@ -741,13 +736,21 @@ run_test_devfs_pty_basic(void)
 
     ok &= (m_vfs_write(NULL, master_fd, master_payload, sizeof(master_payload) - 1, &written) == M_VFS_ERR_OK);
     ok &= (written == sizeof(master_payload) - 1);
-    ok &= (m_vfs_read(NULL, slave_fd, slave_sink, sizeof(slave_sink), &read) == M_VFS_ERR_OK);
+    ok &= (m_vfs_read(NULL,
+                      slave_fd,
+                      slave_sink,
+                      sizeof(master_payload) - 1,
+                      &read) == M_VFS_ERR_OK);
     ok &= (read == sizeof(master_payload) - 1);
     ok &= (memcmp(slave_sink, master_payload, read) == 0);
 
     ok &= (m_vfs_write(NULL, slave_fd, slave_payload, sizeof(slave_payload) - 1, &written) == M_VFS_ERR_OK);
     ok &= (written == sizeof(slave_payload) - 1);
-    ok &= (m_vfs_read(NULL, master_fd, master_sink, sizeof(master_sink), &read) == M_VFS_ERR_OK);
+    ok &= (m_vfs_read(NULL,
+                      master_fd,
+                      master_sink,
+                      sizeof(slave_payload) - 1,
+                      &read) == M_VFS_ERR_OK);
     ok &= (read == sizeof(slave_payload) - 1);
     ok &= (memcmp(master_sink, slave_payload, read) == 0);
 
@@ -1079,7 +1082,7 @@ run_test_shm_pipe_concurrent(void)
     m_vfs_error_t err = m_vfs_read(NULL,
                                    reader_fd,
                                    buffer,
-                                   sizeof(buffer),
+                                   sizeof(payload),
                                    &read);
     ok &= (err == M_VFS_ERR_OK && read == sizeof(payload));
     ok &= (memcmp(buffer, payload, read) == 0);
@@ -1298,7 +1301,7 @@ run_test_shm_poll_notify(void)
 
     size_t read = 0;
     uint8_t sink[16] = {0};
-    ok &= (m_vfs_read(NULL, reader_fd, sink, sizeof(sink), &read) == M_VFS_ERR_OK);
+    ok &= (m_vfs_read(NULL, reader_fd, sink, sizeof(payload), &read) == M_VFS_ERR_OK);
     ok &= (read == sizeof(payload));
     ok &= (xSemaphoreTake(done, pdMS_TO_TICKS(1000)) == pdTRUE);
     vSemaphoreDelete(done);
