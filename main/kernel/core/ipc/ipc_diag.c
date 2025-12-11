@@ -7,6 +7,7 @@
  */
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "kernel/core/ipc/ipc_diag.h"
 #include "kernel/core/ipc/ipc_channel_private.h"
@@ -231,9 +232,11 @@ ipc_error_t ipc_diag_channel_info(ipc_handle_t handle,
 }
 
 ipc_error_t ipc_diag_event_flags_info(ipc_handle_t handle,
+                                      uint32_t mask,
                                       ipc_event_flags_info_t *info)
 {
     (void)handle;
+    (void)mask;
     (void)info;
     return ipc_diag_not_supported();
 }

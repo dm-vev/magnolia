@@ -23,6 +23,7 @@
 #include "kernel/vfs/fs/devfs/devfs_diag.h"
 #include "kernel/vfs/fs/devfs/devfs_ioctl.h"
 #include "kernel/vfs/fs/devfs/devfs_shm.h"
+#include "kernel/vfs/fs/devfs/devfs_stream.h"
 #include "esp_random.h"
 
 #if CONFIG_MAGNOLIA_IPC_ENABLED
@@ -40,7 +41,6 @@ typedef struct {
 } devfs_shm_device_spec_t;
 
 static const devfs_shm_device_spec_t s_devfs_shm_specs[] = {
-    { "/dev/pipe0", 128, IPC_SHM_RING_OVERWRITE_BLOCK },
     { "/dev/stream0", 256, IPC_SHM_RING_OVERWRITE_DROP_OLDEST },
 };
 
@@ -1418,6 +1418,15 @@ void m_devfs_register_default_devices(void)
     devfs_register("/dev/random", &s_devfs_random_ops, NULL);
 #if CONFIG_MAGNOLIA_IPC_ENABLED
     devfs_shm_register_devices();
+#if CONFIG_MAGNOLIA_DEVFS_PIPES
+    devfs_stream_register_pipes();
+#endif
+#if CONFIG_MAGNOLIA_DEVFS_TTY
+    devfs_stream_register_ttys();
+#endif
+#if CONFIG_MAGNOLIA_DEVFS_PTY
+    devfs_stream_register_ptys();
+#endif
 #endif
 }
 

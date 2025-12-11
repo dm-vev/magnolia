@@ -296,17 +296,25 @@ run_test_device_io(void)
 
     int dir_fd = -1;
     if (m_vfs_open(NULL, "/dev", 0, &dir_fd) == M_VFS_ERR_OK) {
+        bool found_null = false;
+        bool found_zero = false;
+        bool found_random = false;
+        bool dir_err = true;
         m_vfs_dirent_t entries[8];
-        size_t populated = 0;
-        m_vfs_error_t dir_err = m_vfs_readdir(NULL,
+        while (true) {
+            size_t populated = 0;
+            m_vfs_error_t err = m_vfs_readdir(NULL,
                                               dir_fd,
                                               entries,
                                               sizeof(entries) / sizeof(entries[0]),
                                               &populated);
-        bool found_null = false;
-        bool found_zero = false;
-        bool found_random = false;
-        if (dir_err == M_VFS_ERR_OK) {
+            if (err != M_VFS_ERR_OK) {
+                dir_err = false;
+                break;
+            }
+            if (populated == 0) {
+                break;
+            }
             for (size_t i = 0; i < populated; ++i) {
                 if (strcmp(entries[i].name, "null") == 0) {
                     found_null = true;
@@ -319,7 +327,7 @@ run_test_device_io(void)
                 }
             }
         }
-        ok &= (dir_err == M_VFS_ERR_OK && found_null && found_zero && found_random);
+        ok &= (dir_err && found_null && found_zero && found_random);
         m_vfs_close(NULL, dir_fd);
     } else {
         ok = false;
@@ -602,11 +610,13 @@ cleanup_namespace:
 static bool
 run_test_devfs_pipe_basic(void)
 {
+    ESP_LOGI(TAG, "pipe basic: starting");
     if (m_vfs_init() != M_VFS_ERR_OK) {
         return false;
     }
 
     bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
+    ESP_LOGI(TAG, "pipe basic: mount %s", mounted ? "ok" : "fail");
     if (!mounted) {
         return false;
     }
@@ -622,12 +632,15 @@ run_test_devfs_pipe_basic(void)
         ok = false;
         goto cleanup_pipe;
     }
+    ESP_LOGI(TAG, "pipe basic: opened /dev/pipe0");
 
     ok &= (m_vfs_write(NULL, fd, payload, sizeof(payload) - 1, &written) == M_VFS_ERR_OK);
     ok &= (written == sizeof(payload) - 1);
+    ESP_LOGI(TAG, "pipe basic: wrote %u bytes", (unsigned)written);
     ok &= (m_vfs_read(NULL, fd, sink, sizeof(sink), &read) == M_VFS_ERR_OK);
     ok &= (read == sizeof(payload) - 1);
     ok &= (memcmp(sink, payload, read) == 0);
+    ESP_LOGI(TAG, "pipe basic: read %u bytes", (unsigned)read);
 
 cleanup_pipe:
     if (fd >= 0) {
