@@ -228,7 +228,7 @@ devfs_shm_read(void *private_data,
         return M_VFS_ERR_DESTROYED;
     }
 
-    ipc_error_t err = ipc_shm_read(&ctx->reader, buffer, size, read);
+    ipc_error_t err = ipc_shm_try_read(&ctx->reader, buffer, size, read);
     if (err == IPC_ERR_WOULD_BLOCK || err == IPC_ERR_EMPTY) {
         *read = 0;
         return M_VFS_ERR_WOULD_BLOCK;
@@ -261,7 +261,7 @@ devfs_shm_write(void *private_data,
         return M_VFS_ERR_DESTROYED;
     }
 
-    ipc_error_t err = ipc_shm_write(&ctx->writer, buffer, size);
+    ipc_error_t err = ipc_shm_try_write(&ctx->writer, buffer, size);
     if (err == IPC_OK) {
         *written = size;
     } else {

@@ -172,6 +172,15 @@ config MAGNOLIA_VFS_SELFTESTS
         counters, read-cache stats, FD/dup semantics, metadata coverage) during
         initialization so the core is sanity-checked before real workloads.
 
+config MAGNOLIA_VFS_STRESS_TESTS
+    bool "Enable VFS/DevFS stress tests"
+    default n
+    depends on MAGNOLIA_VFS_ENABLED
+    help
+        Run higher-load stress tests for the VFS/DevFS IPC path (close races,
+        poll under teardown, error-injection smoke). These tests are intended
+        for development and bring-up; disable in production builds.
+
 config MAGNOLIA_LITTLEFS_ENABLED
     bool "Enable LittleFS driver"
     default y

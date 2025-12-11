@@ -1194,7 +1194,7 @@ ipc_error_t ipc_shm_query(ipc_handle_t handle, ipc_shm_info_t *info)
     info->waiting_readers = region->waiting_readers;
     info->waiting_writers = region->waiting_writers;
     info->destroyed = region->header.destroyed;
-    info->ring_capacity = region->region_size;
+    info->ring_capacity = ipc_shm_ring_capacity(region);
     info->ring_used = region->ring_used;
     info->ring_overflows = region->stats.ring_overflows;
     info->packet_inflight = region->packet_count;

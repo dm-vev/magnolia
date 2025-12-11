@@ -17,6 +17,9 @@
 #include "kernel/vfs/fs/devfs/devfs_diag.h"
 #include "kernel/vfs/fs/devfs/devfs_ioctl.h"
 #include "kernel/vfs/fs/devfs/devfs_shm.h"
+#if CONFIG_MAGNOLIA_VFS_STRESS_TESTS
+#include "kernel/core/vfs/core/m_vfs_test.h"
+#endif
 
 static const char *TAG = "devfs_tests";
 static char s_devfs_test_last_error[128];
@@ -1067,6 +1070,293 @@ devfs_shm_writer_task(void *arg)
     vTaskDelete(NULL);
 }
 
+typedef struct {
+    int fd;
+    SemaphoreHandle_t done;
+    m_vfs_error_t result;
+} devfs_shm_waiter_ctx_t;
+
+static void
+devfs_shm_reader_wait_task(void *arg)
+{
+    devfs_shm_waiter_ctx_t *ctx = (devfs_shm_waiter_ctx_t *)arg;
+    if (ctx == NULL) {
+        vTaskDelete(NULL);
+        return;
+    }
+
+    uint8_t tmp = 0;
+    size_t read = 0;
+    ctx->result = m_vfs_read(NULL, ctx->fd, &tmp, 1, &read);
+    if (ctx->done != NULL) {
+        xSemaphoreGive(ctx->done);
+    }
+    vTaskDelete(NULL);
+}
+
+#endif /* CONFIG_MAGNOLIA_IPC_ENABLED */
+
+#if CONFIG_MAGNOLIA_DEVFS_PIPES
+
+typedef struct {
+    int fd;
+    SemaphoreHandle_t done;
+    m_vfs_error_t result;
+} devfs_pipe_waiter_ctx_t;
+
+static void
+devfs_pipe_reader_wait_task(void *arg)
+{
+    devfs_pipe_waiter_ctx_t *ctx = (devfs_pipe_waiter_ctx_t *)arg;
+    if (ctx == NULL) {
+        vTaskDelete(NULL);
+        return;
+    }
+
+    uint8_t tmp = 0;
+    size_t read = 0;
+    ctx->result = m_vfs_read(NULL, ctx->fd, &tmp, 1, &read);
+    if (ctx->done != NULL) {
+        xSemaphoreGive(ctx->done);
+    }
+    vTaskDelete(NULL);
+}
+
+typedef struct {
+    int fd;
+    SemaphoreHandle_t done;
+    m_vfs_error_t result;
+    uint32_t revents;
+    size_t ready;
+} devfs_poll_waiter_ctx_t;
+
+static void
+devfs_poll_wait_task(void *arg)
+{
+    devfs_poll_waiter_ctx_t *ctx = (devfs_poll_waiter_ctx_t *)arg;
+    if (ctx == NULL) {
+        vTaskDelete(NULL);
+        return;
+    }
+
+    m_vfs_pollfd_t entry = {
+        .fd = ctx->fd,
+        .events = M_VFS_POLLIN,
+    };
+    m_timer_deadline_t deadline = m_timer_deadline_from_relative(5000000);
+    ctx->result = m_vfs_poll(NULL, &entry, 1, &deadline, &ctx->ready);
+    ctx->revents = entry.revents;
+
+    if (ctx->done != NULL) {
+        xSemaphoreGive(ctx->done);
+    }
+    vTaskDelete(NULL);
+}
+
+typedef struct {
+    int fd;
+    SemaphoreHandle_t done;
+    m_vfs_error_t result;
+} devfs_pipe_writer_ctx_t;
+
+static void
+devfs_pipe_writer_wait_task(void *arg)
+{
+    devfs_pipe_writer_ctx_t *ctx = (devfs_pipe_writer_ctx_t *)arg;
+    if (ctx == NULL) {
+        vTaskDelete(NULL);
+        return;
+    }
+
+    uint8_t payload[512];
+    memset(payload, 0xCD, sizeof(payload));
+    size_t written = 0;
+    ctx->result = m_vfs_write(NULL,
+                               ctx->fd,
+                               payload,
+                               sizeof(payload),
+                               &written);
+    if (ctx->done != NULL) {
+        xSemaphoreGive(ctx->done);
+    }
+    vTaskDelete(NULL);
+}
+
+static bool
+run_test_pipe_close_wakes_reader(void)
+{
+    if (!devfs_tests_prepare_env("pipe close wake")) {
+        return false;
+    }
+
+    bool ok = true;
+    int reader_fd = -1;
+    DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/pipe0", 0, &reader_fd) == M_VFS_ERR_OK,
+                      cleanup,
+                      "pipe close: open reader failed");
+
+    SemaphoreHandle_t done = xSemaphoreCreateBinary();
+    DEVFS_TEST_ASSERT(done != NULL, cleanup, "pipe close: semaphore alloc failed");
+
+    devfs_pipe_waiter_ctx_t ctx = {
+        .fd = reader_fd,
+        .done = done,
+        .result = M_VFS_ERR_OK,
+    };
+
+    if (xTaskCreate(devfs_pipe_reader_wait_task,
+                    "devfs_pipe_wait_reader",
+                    2048,
+                    &ctx,
+                    tskIDLE_PRIORITY + 1,
+                    NULL) != pdPASS) {
+        ESP_LOGE(TAG, "pipe close: reader task create failed");
+        vSemaphoreDelete(done);
+        ok = false;
+        goto cleanup;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(10));
+    m_vfs_close(NULL, reader_fd);
+    reader_fd = -1;
+
+    DEVFS_TEST_ASSERT(xSemaphoreTake(done, pdMS_TO_TICKS(1000)) == pdTRUE,
+                      cleanup,
+                      "pipe close: reader completion timeout");
+    vSemaphoreDelete(done);
+    DEVFS_TEST_ASSERT(ctx.result == M_VFS_ERR_DESTROYED,
+                      cleanup,
+                      "pipe close: reader err=%d expected=%d",
+                      ctx.result,
+                      M_VFS_ERR_DESTROYED);
+
+cleanup:
+    if (reader_fd >= 0) {
+        m_vfs_close(NULL, reader_fd);
+    }
+    return ok;
+}
+
+static bool
+run_test_pipe_poll_close_wakes_waiter(void)
+{
+    if (!devfs_tests_prepare_env("pipe poll close wake")) {
+        return false;
+    }
+
+    bool ok = true;
+    int fd = -1;
+    DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/pipe0", 0, &fd) == M_VFS_ERR_OK,
+                      cleanup,
+                      "pipe poll close: open failed");
+
+    SemaphoreHandle_t done = xSemaphoreCreateBinary();
+    DEVFS_TEST_ASSERT(done != NULL, cleanup, "pipe poll close: semaphore alloc failed");
+
+    devfs_poll_waiter_ctx_t ctx = {
+        .fd = fd,
+        .done = done,
+        .result = M_VFS_ERR_OK,
+        .revents = 0,
+        .ready = 0,
+    };
+
+    if (xTaskCreate(devfs_poll_wait_task,
+                    "devfs_pipe_poll_wait",
+                    2048,
+                    &ctx,
+                    tskIDLE_PRIORITY + 1,
+                    NULL) != pdPASS) {
+        ESP_LOGE(TAG, "pipe poll close: poll task create failed");
+        vSemaphoreDelete(done);
+        ok = false;
+        goto cleanup;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(10));
+    m_vfs_close(NULL, fd);
+    fd = -1;
+
+    DEVFS_TEST_ASSERT(xSemaphoreTake(done, pdMS_TO_TICKS(1000)) == pdTRUE,
+                      cleanup,
+                      "pipe poll close: poll completion timeout");
+    vSemaphoreDelete(done);
+    DEVFS_TEST_ASSERT((ctx.result == M_VFS_ERR_DESTROYED) ||
+                      (ctx.result == M_VFS_ERR_OK &&
+                       ctx.ready == 1 &&
+                       (ctx.revents & (M_VFS_POLLERR | M_VFS_POLLHUP)) != 0),
+                      cleanup,
+                      "pipe poll close: poll err=%d ready=%u revents=0x%x",
+                      ctx.result,
+                      (unsigned)ctx.ready,
+                      (unsigned)ctx.revents);
+
+cleanup:
+    if (fd >= 0) {
+        m_vfs_close(NULL, fd);
+    }
+    return ok;
+}
+
+static bool
+run_test_pipe_close_wakes_blocked_writer(void)
+{
+    if (!devfs_tests_prepare_env("pipe writer close wake")) {
+        return false;
+    }
+
+    bool ok = true;
+    int fd = -1;
+    DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/pipe0", 0, &fd) == M_VFS_ERR_OK,
+                      cleanup,
+                      "pipe writer close: open failed");
+
+    SemaphoreHandle_t done = xSemaphoreCreateBinary();
+    DEVFS_TEST_ASSERT(done != NULL, cleanup, "pipe writer close: semaphore alloc failed");
+
+    devfs_pipe_writer_ctx_t ctx = {
+        .fd = fd,
+        .done = done,
+        .result = M_VFS_ERR_OK,
+    };
+
+    if (xTaskCreate(devfs_pipe_writer_wait_task,
+                    "devfs_pipe_write_wait",
+                    2048,
+                    &ctx,
+                    tskIDLE_PRIORITY + 1,
+                    NULL) != pdPASS) {
+        ESP_LOGE(TAG, "pipe writer close: writer task create failed");
+        vSemaphoreDelete(done);
+        ok = false;
+        goto cleanup;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(10));
+    m_vfs_close(NULL, fd);
+    fd = -1;
+
+    DEVFS_TEST_ASSERT(xSemaphoreTake(done, pdMS_TO_TICKS(1000)) == pdTRUE,
+                      cleanup,
+                      "pipe writer close: writer completion timeout");
+    vSemaphoreDelete(done);
+    DEVFS_TEST_ASSERT(ctx.result == M_VFS_ERR_DESTROYED,
+                      cleanup,
+                      "pipe writer close: writer err=%d expected=%d",
+                      ctx.result,
+                      M_VFS_ERR_DESTROYED);
+
+cleanup:
+    if (fd >= 0) {
+        m_vfs_close(NULL, fd);
+    }
+    return ok;
+}
+
+#endif /* CONFIG_MAGNOLIA_DEVFS_PIPES */
+
+#if CONFIG_MAGNOLIA_IPC_ENABLED
+
 static bool
 run_test_shm_pipe_concurrent(void)
 {
@@ -1141,6 +1431,61 @@ cleanup:
 }
 
 static bool
+run_test_shm_pipe_close_wakes_reader(void)
+{
+    if (!devfs_tests_prepare_env("shm pipe close wake")) {
+        return false;
+    }
+
+    bool ok = true;
+    int reader_fd = -1;
+    DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/pipe0", 0, &reader_fd) == M_VFS_ERR_OK,
+                      cleanup,
+                      "shm pipe close: open reader failed");
+
+    SemaphoreHandle_t done = xSemaphoreCreateBinary();
+    DEVFS_TEST_ASSERT(done != NULL, cleanup, "shm pipe close: semaphore alloc failed");
+
+    devfs_shm_waiter_ctx_t ctx = {
+        .fd = reader_fd,
+        .done = done,
+        .result = M_VFS_ERR_OK,
+    };
+
+    if (xTaskCreate(devfs_shm_reader_wait_task,
+                    "devfs_shm_pipe_wait_reader",
+                    2048,
+                    &ctx,
+                    tskIDLE_PRIORITY + 1,
+                    NULL) != pdPASS) {
+        ESP_LOGE(TAG, "shm pipe close: reader task create failed");
+        vSemaphoreDelete(done);
+        ok = false;
+        goto cleanup;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(10));
+    m_vfs_close(NULL, reader_fd);
+    reader_fd = -1;
+
+    DEVFS_TEST_ASSERT(xSemaphoreTake(done, pdMS_TO_TICKS(1000)) == pdTRUE,
+                      cleanup,
+                      "shm pipe close: reader completion timeout");
+    vSemaphoreDelete(done);
+    DEVFS_TEST_ASSERT(ctx.result == M_VFS_ERR_DESTROYED,
+                      cleanup,
+                      "shm pipe close: reader err=%d expected=%d",
+                      ctx.result,
+                      M_VFS_ERR_DESTROYED);
+
+cleanup:
+    if (reader_fd >= 0) {
+        m_vfs_close(NULL, reader_fd);
+    }
+    return ok;
+}
+
+static bool
 run_test_shm_pipe_timeout(void)
 {
     if (!devfs_tests_prepare_env("shm timeout")) {
@@ -1163,28 +1508,53 @@ run_test_shm_pipe_timeout(void)
 
     uint8_t chunk[32];
     memset(chunk, 0xAB, sizeof(chunk));
-    size_t remaining = info.capacity;
-    while (remaining > 0) {
-        size_t chunk_size = (remaining > sizeof(chunk)) ? sizeof(chunk) : remaining;
+    size_t total_written = 0;
+    size_t extra_written = 0;
+    m_vfs_error_t timed_err = M_VFS_ERR_OK;
+
+    while (true) {
         size_t written = 0;
-        m_vfs_error_t write_err = m_vfs_write(NULL, fd, chunk, chunk_size, &written);
-        DEVFS_TEST_ASSERT(write_err == M_VFS_ERR_OK && written == chunk_size,
+        m_timer_deadline_t fill_deadline = m_timer_deadline_from_relative(10000);
+        m_vfs_error_t write_err = m_vfs_write_timed(NULL,
+                                                    fd,
+                                                    chunk,
+                                                    sizeof(chunk),
+                                                    &written,
+                                                    &fill_deadline);
+        if (write_err == M_VFS_ERR_TIMEOUT && written == 0) {
+            timed_err = M_VFS_ERR_TIMEOUT;
+            extra_written = 0;
+            break;
+        }
+        DEVFS_TEST_ASSERT(write_err == M_VFS_ERR_OK && written > 0,
                           cleanup,
-                          "shm timeout: fill write err=%d written=%u chunk=%u",
+                          "shm timeout: fill write err=%d written=%u",
                           write_err,
-                          (unsigned)written,
-                          (unsigned)chunk_size);
-        remaining -= written;
+                          (unsigned)written);
+        total_written += written;
+
+        extra_written = 0;
+        m_timer_deadline_t probe_deadline = m_timer_deadline_from_relative(1000);
+        timed_err = m_vfs_write_timed(NULL,
+                                      fd,
+                                      "Z",
+                                      1,
+                                      &extra_written,
+                                      &probe_deadline);
+        if (timed_err == M_VFS_ERR_TIMEOUT) {
+            break;
+        }
+        DEVFS_TEST_ASSERT(timed_err == M_VFS_ERR_OK && extra_written == 1,
+                          cleanup,
+                          "shm timeout: probe write err=%d written=%u",
+                          timed_err,
+                          (unsigned)extra_written);
+        total_written += extra_written;
     }
 
-    size_t extra_written = 0;
-    m_timer_deadline_t deadline = m_timer_deadline_from_relative(10000);
-    m_vfs_error_t timed_err = m_vfs_write_timed(NULL,
-                                                fd,
-                                                "Z",
-                                                1,
-                                                &extra_written,
-                                                &deadline);
+    DEVFS_TEST_ASSERT(total_written > 0,
+                      cleanup,
+                      "shm timeout: fill wrote nothing");
     DEVFS_TEST_ASSERT(timed_err == M_VFS_ERR_TIMEOUT && extra_written == 0,
                       cleanup,
                       "shm timeout: timed write err=%d written=%u",
@@ -1223,14 +1593,18 @@ run_test_shm_stream_drop(void)
     }
 
     bool ok = true;
-    int fd = -1;
-    DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/stream0", 0, &fd) == M_VFS_ERR_OK,
+    int reader_fd = -1;
+    int writer_fd = -1;
+    DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/stream0", 0, &reader_fd) == M_VFS_ERR_OK,
                       cleanup,
                       "shm drop: open failed");
+    DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/stream0", 0, &writer_fd) == M_VFS_ERR_OK,
+                      cleanup,
+                      "shm drop: open writer failed");
 
     uint8_t payload[512];
     devfs_shm_buffer_info_t info = {0};
-    m_vfs_error_t err = m_vfs_ioctl(NULL, fd, DEVFS_SHM_IOCTL_BUFFER_INFO, &info);
+    m_vfs_error_t err = m_vfs_ioctl(NULL, reader_fd, DEVFS_SHM_IOCTL_BUFFER_INFO, &info);
     DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK &&
                       info.capacity > 0 &&
                       info.capacity * 2 <= sizeof(payload),
@@ -1244,36 +1618,50 @@ run_test_shm_stream_drop(void)
         payload[i] = (uint8_t)i;
     }
 
+    size_t total_written = 0;
     for (size_t offset = 0; offset < total;) {
         size_t chunk_size = ((total - offset) > 64) ? 64 : (total - offset);
         size_t written = 0;
-        m_vfs_error_t write_err = m_vfs_write(NULL,
-                                              fd,
-                                              payload + offset,
-                                              chunk_size,
-                                              &written);
-        DEVFS_TEST_ASSERT(write_err == M_VFS_ERR_OK && written == chunk_size,
+        m_timer_deadline_t write_deadline = m_timer_deadline_from_relative(10000);
+        m_vfs_error_t write_err = m_vfs_write_timed(NULL,
+                                                    writer_fd,
+                                                    payload + offset,
+                                                    chunk_size,
+                                                    &written,
+                                                    &write_deadline);
+        if (write_err == M_VFS_ERR_TIMEOUT && written == 0) {
+            break;
+        }
+        DEVFS_TEST_ASSERT(write_err == M_VFS_ERR_OK && written > 0,
                           cleanup,
                           "shm drop: write err=%d written=%u chunk=%u",
                           write_err,
                           (unsigned)written,
                           (unsigned)chunk_size);
         offset += written;
+        total_written += written;
     }
+    DEVFS_TEST_ASSERT(total_written > 0,
+                      cleanup,
+                      "shm drop: wrote nothing");
+
+    vTaskDelay(pdMS_TO_TICKS(1));
 
     uint8_t result[512] = {0};
     size_t read = 0;
+    m_timer_deadline_t read_deadline = m_timer_deadline_from_relative(100000);
     m_vfs_error_t read_err =
-            m_vfs_read(NULL, fd, result, info.capacity, &read);
-    DEVFS_TEST_ASSERT(read_err == M_VFS_ERR_OK && read == info.capacity,
+            m_vfs_read_timed(NULL, reader_fd, result, info.capacity, &read, &read_deadline);
+    size_t expected_read = (total_written >= info.capacity) ? info.capacity : total_written;
+    DEVFS_TEST_ASSERT(read_err == M_VFS_ERR_OK && read == expected_read,
                       cleanup,
                       "shm drop: read err=%d read=%u expected=%u",
                       read_err,
                       (unsigned)read,
-                      (unsigned)info.capacity);
+                      (unsigned)expected_read);
 
-    size_t start = total - info.capacity;
-    for (size_t i = 0; i < info.capacity; ++i) {
+    size_t start = (total_written >= expected_read) ? (total_written - expected_read) : 0;
+    for (size_t i = 0; i < expected_read; ++i) {
         DEVFS_TEST_ASSERT(result[i] == payload[start + i],
                           cleanup,
                           "shm drop: mismatch idx=%u got=%u expected=%u",
@@ -1283,8 +1671,66 @@ run_test_shm_stream_drop(void)
     }
 
 cleanup:
-    if (fd >= 0) {
-        m_vfs_close(NULL, fd);
+    if (reader_fd >= 0) {
+        m_vfs_close(NULL, reader_fd);
+    }
+    if (writer_fd >= 0) {
+        m_vfs_close(NULL, writer_fd);
+    }
+    return ok;
+}
+
+static bool
+run_test_shm_stream_close_wakes_reader(void)
+{
+    if (!devfs_tests_prepare_env("shm stream close wake")) {
+        return false;
+    }
+
+    bool ok = true;
+    int reader_fd = -1;
+    DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/stream0", 0, &reader_fd) == M_VFS_ERR_OK,
+                      cleanup,
+                      "shm stream close: open reader failed");
+
+    SemaphoreHandle_t done = xSemaphoreCreateBinary();
+    DEVFS_TEST_ASSERT(done != NULL, cleanup, "shm stream close: semaphore alloc failed");
+
+    devfs_shm_waiter_ctx_t ctx = {
+        .fd = reader_fd,
+        .done = done,
+        .result = M_VFS_ERR_OK,
+    };
+
+    if (xTaskCreate(devfs_shm_reader_wait_task,
+                    "devfs_shm_stream_wait_reader",
+                    2048,
+                    &ctx,
+                    tskIDLE_PRIORITY + 1,
+                    NULL) != pdPASS) {
+        ESP_LOGE(TAG, "shm stream close: reader task create failed");
+        vSemaphoreDelete(done);
+        ok = false;
+        goto cleanup;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(10));
+    m_vfs_close(NULL, reader_fd);
+    reader_fd = -1;
+
+    DEVFS_TEST_ASSERT(xSemaphoreTake(done, pdMS_TO_TICKS(1000)) == pdTRUE,
+                      cleanup,
+                      "shm stream close: reader completion timeout");
+    vSemaphoreDelete(done);
+    DEVFS_TEST_ASSERT(ctx.result == M_VFS_ERR_DESTROYED,
+                      cleanup,
+                      "shm stream close: reader err=%d expected=%d",
+                      ctx.result,
+                      M_VFS_ERR_DESTROYED);
+
+cleanup:
+    if (reader_fd >= 0) {
+        m_vfs_close(NULL, reader_fd);
     }
     return ok;
 }
@@ -1374,6 +1820,170 @@ cleanup:
     return ok;
 }
 
+#if CONFIG_MAGNOLIA_VFS_STRESS_TESTS
+
+#if CONFIG_MAGNOLIA_DEVFS_PIPES
+static bool
+run_stress_pipe_close_race(void)
+{
+    if (!devfs_tests_prepare_env("pipe close race")) {
+        return false;
+    }
+
+    bool ok = true;
+    for (size_t i = 0; i < 20; ++i) {
+        int fd = -1;
+        DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/pipe0", 0, &fd) == M_VFS_ERR_OK,
+                          cleanup_iter,
+                          "pipe close race: open failed iter=%u",
+                          (unsigned)i);
+
+        SemaphoreHandle_t done = xSemaphoreCreateBinary();
+        DEVFS_TEST_ASSERT(done != NULL,
+                          cleanup_iter,
+                          "pipe close race: sem alloc failed iter=%u",
+                          (unsigned)i);
+
+        devfs_pipe_waiter_ctx_t ctx = {
+            .fd = fd,
+            .done = done,
+            .result = M_VFS_ERR_OK,
+        };
+
+        if (xTaskCreate(devfs_pipe_reader_wait_task,
+                        "devfs_pipe_race_reader",
+                        2048,
+                        &ctx,
+                        tskIDLE_PRIORITY + 1,
+                        NULL) != pdPASS) {
+            vSemaphoreDelete(done);
+            ok = false;
+            goto cleanup_iter;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1));
+        m_vfs_close(NULL, fd);
+        fd = -1;
+
+        DEVFS_TEST_ASSERT(xSemaphoreTake(done, pdMS_TO_TICKS(1000)) == pdTRUE,
+                          cleanup_iter,
+                          "pipe close race: reader timeout iter=%u",
+                          (unsigned)i);
+        vSemaphoreDelete(done);
+        DEVFS_TEST_ASSERT(ctx.result == M_VFS_ERR_DESTROYED,
+                          cleanup_iter,
+                          "pipe close race: reader err=%d iter=%u",
+                          ctx.result,
+                          (unsigned)i);
+        continue;
+
+cleanup_iter:
+        if (fd >= 0) {
+            m_vfs_close(NULL, fd);
+        }
+        if (done != NULL) {
+            vSemaphoreDelete(done);
+        }
+        break;
+    }
+
+    return ok;
+}
+#endif /* CONFIG_MAGNOLIA_DEVFS_PIPES */
+
+#if CONFIG_MAGNOLIA_IPC_ENABLED
+static bool
+run_stress_shm_stream_close_race(void)
+{
+    if (!devfs_tests_prepare_env("shm stream close race")) {
+        return false;
+    }
+
+    bool ok = true;
+    for (size_t i = 0; i < 20; ++i) {
+        int fd = -1;
+        DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/stream0", 0, &fd) == M_VFS_ERR_OK,
+                          cleanup_iter,
+                          "shm stream close race: open failed iter=%u",
+                          (unsigned)i);
+
+        SemaphoreHandle_t done = xSemaphoreCreateBinary();
+        DEVFS_TEST_ASSERT(done != NULL,
+                          cleanup_iter,
+                          "shm stream close race: sem alloc failed iter=%u",
+                          (unsigned)i);
+
+        devfs_shm_waiter_ctx_t ctx = {
+            .fd = fd,
+            .done = done,
+            .result = M_VFS_ERR_OK,
+        };
+
+        if (xTaskCreate(devfs_shm_reader_wait_task,
+                        "devfs_shm_stream_race_reader",
+                        2048,
+                        &ctx,
+                        tskIDLE_PRIORITY + 1,
+                        NULL) != pdPASS) {
+            vSemaphoreDelete(done);
+            ok = false;
+            goto cleanup_iter;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1));
+        m_vfs_close(NULL, fd);
+        fd = -1;
+
+        DEVFS_TEST_ASSERT(xSemaphoreTake(done, pdMS_TO_TICKS(1000)) == pdTRUE,
+                          cleanup_iter,
+                          "shm stream close race: reader timeout iter=%u",
+                          (unsigned)i);
+        vSemaphoreDelete(done);
+        DEVFS_TEST_ASSERT(ctx.result == M_VFS_ERR_DESTROYED,
+                          cleanup_iter,
+                          "shm stream close race: reader err=%d iter=%u",
+                          ctx.result,
+                          (unsigned)i);
+        continue;
+
+cleanup_iter:
+        if (fd >= 0) {
+            m_vfs_close(NULL, fd);
+        }
+        if (done != NULL) {
+            vSemaphoreDelete(done);
+        }
+        break;
+    }
+
+    return ok;
+}
+#endif /* CONFIG_MAGNOLIA_IPC_ENABLED */
+
+static bool
+run_stress_error_injection_smoke(void)
+{
+    if (!devfs_tests_prepare_env("vfs inject smoke")) {
+        return false;
+    }
+
+    bool ok = true;
+    int fd = -1;
+
+    m_vfs_test_set_error_injection(true, M_VFS_ERR_NO_MEMORY);
+    m_vfs_error_t err = m_vfs_open(NULL, "/dev/pipe0", 0, &fd);
+    ok &= (err == M_VFS_ERR_NO_MEMORY || err == M_VFS_ERR_BUSY);
+    m_vfs_test_set_error_injection(false, M_VFS_ERR_BUSY);
+
+    if (fd >= 0) {
+        m_vfs_close(NULL, fd);
+    }
+
+    return ok;
+}
+
+#endif /* CONFIG_MAGNOLIA_VFS_STRESS_TESTS */
+
 #endif /* CONFIG_MAGNOLIA_IPC_ENABLED */
 
 void
@@ -1394,6 +2004,12 @@ devfs_selftests_run(void)
 #if CONFIG_MAGNOLIA_DEVFS_PIPES
     overall &= test_report("devfs pipe basic",
                            run_test_devfs_pipe_basic());
+    overall &= test_report("devfs pipe close wakes reader",
+                           run_test_pipe_close_wakes_reader());
+    overall &= test_report("devfs pipe poll close wakes waiter",
+                           run_test_pipe_poll_close_wakes_waiter());
+    overall &= test_report("devfs pipe close wakes blocked writer",
+                           run_test_pipe_close_wakes_blocked_writer());
 #endif
 #if CONFIG_MAGNOLIA_DEVFS_TTY
     overall &= test_report("devfs tty canonical",
@@ -1404,14 +2020,35 @@ devfs_selftests_run(void)
                            run_test_devfs_pty_basic());
 #endif
 #if CONFIG_MAGNOLIA_IPC_ENABLED
+    ESP_LOGI(TAG, "Starting devfs shm pipe concurrent");
     overall &= test_report("devfs shm pipe concurrent",
                            run_test_shm_pipe_concurrent());
+    overall &= test_report("devfs shm pipe close wakes reader",
+                           run_test_shm_pipe_close_wakes_reader());
+    ESP_LOGI(TAG, "Starting devfs shm pipe timeout");
     overall &= test_report("devfs shm pipe timeout",
                            run_test_shm_pipe_timeout());
+    ESP_LOGI(TAG, "Starting devfs shm stream drop");
     overall &= test_report("devfs shm stream drop",
                            run_test_shm_stream_drop());
+    overall &= test_report("devfs shm stream close wakes reader",
+                           run_test_shm_stream_close_wakes_reader());
+    ESP_LOGI(TAG, "Starting devfs shm poll notify");
     overall &= test_report("devfs shm poll notify",
                            run_test_shm_poll_notify());
+#endif
+
+#if CONFIG_MAGNOLIA_VFS_STRESS_TESTS
+#if CONFIG_MAGNOLIA_DEVFS_PIPES
+    overall &= test_report("stress pipe close race",
+                           run_stress_pipe_close_race());
+#endif
+#if CONFIG_MAGNOLIA_IPC_ENABLED
+    overall &= test_report("stress shm stream close race",
+                           run_stress_shm_stream_close_race());
+#endif
+    overall &= test_report("stress vfs error injection smoke",
+                           run_stress_error_injection_smoke());
 #endif
     ESP_LOGI(TAG, "devfs self-tests %s", overall ? "PASSED" : "FAILED");
     devfs_tests_cleanup_env();

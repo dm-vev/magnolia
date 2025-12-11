@@ -9,6 +9,7 @@
 #include "kernel/core/job/m_job_event.h"
 #include "kernel/core/vfs/core/m_vfs_jobcwd.h"
 #include "kernel/core/vfs/core/m_vfs_object.h"
+#include "kernel/core/vfs/core/m_vfs_wait.h"
 #include "kernel/core/vfs/fd/m_vfs_fd.h"
 
 #if CONFIG_MAGNOLIA_VFS_FD_LOGGING
@@ -82,15 +83,37 @@ _m_vfs_fd_table_cleanup(m_vfs_job_fd_table_t *table)
         return;
     }
 
-    portENTER_CRITICAL(&table->lock);
-    for (size_t i = 0; i < M_VFS_JOB_FD_CAPACITY; ++i) {
-        if (table->entries[i].in_use) {
-            table->entries[i].in_use = false;
-            m_vfs_file_release(table->entries[i].file);
-            table->entries[i].file = NULL;
+    while (true) {
+        m_vfs_file_t *file = NULL;
+
+        portENTER_CRITICAL(&table->lock);
+        for (size_t i = 0; i < M_VFS_JOB_FD_CAPACITY; ++i) {
+            if (table->entries[i].in_use) {
+                file = table->entries[i].file;
+                table->entries[i].in_use = false;
+                table->entries[i].file = NULL;
+                break;
+            }
         }
+        portEXIT_CRITICAL(&table->lock);
+
+        if (file == NULL) {
+            break;
+        }
+
+        portENTER_CRITICAL(&file->lock);
+        file->closed = true;
+        portEXIT_CRITICAL(&file->lock);
+        m_vfs_file_notify_event(file);
+
+        if (file->node != NULL && file->node->fs_type != NULL &&
+                file->node->fs_type->ops != NULL &&
+                file->node->fs_type->ops->close != NULL) {
+            file->node->fs_type->ops->close(file);
+        }
+
+        m_vfs_file_release(file);
     }
-    portEXIT_CRITICAL(&table->lock);
 }
 
 static void
@@ -379,33 +402,58 @@ m_vfs_fd_close_mount_fds(m_vfs_mount_t *mount)
         return;
     }
 
-    portENTER_CRITICAL(&g_vfs_job_fd_lock);
-    m_vfs_job_fd_table_t *iter = g_vfs_job_fd_tables;
-    while (iter != NULL) {
-        portENTER_CRITICAL(&iter->lock);
-        for (size_t i = 0; i < M_VFS_JOB_FD_CAPACITY; ++i) {
-            if (!iter->entries[i].in_use ||
-                    !_m_vfs_fd_entry_matches_mount(iter->entries[i].file, mount)) {
-                continue;
-            }
-            iter->entries[i].in_use = false;
-            m_vfs_file_release(iter->entries[i].file);
-            iter->entries[i].file = NULL;
-        }
-        portEXIT_CRITICAL(&iter->lock);
-        iter = iter->next;
-    }
-    portEXIT_CRITICAL(&g_vfs_job_fd_lock);
+    while (true) {
+        m_vfs_file_t *file = NULL;
 
-    portENTER_CRITICAL(&g_vfs_kernel_lock);
-    for (size_t i = 0; i < M_VFS_KERNEL_FD_CAPACITY; ++i) {
-        if (!g_vfs_kernel_entries[i].in_use ||
-                !_m_vfs_fd_entry_matches_mount(g_vfs_kernel_entries[i].file, mount)) {
-            continue;
+        portENTER_CRITICAL(&g_vfs_job_fd_lock);
+        m_vfs_job_fd_table_t *iter = g_vfs_job_fd_tables;
+        while (iter != NULL && file == NULL) {
+            portENTER_CRITICAL(&iter->lock);
+            for (size_t i = 0; i < M_VFS_JOB_FD_CAPACITY; ++i) {
+                if (!iter->entries[i].in_use ||
+                        !_m_vfs_fd_entry_matches_mount(iter->entries[i].file, mount)) {
+                    continue;
+                }
+                file = iter->entries[i].file;
+                iter->entries[i].in_use = false;
+                iter->entries[i].file = NULL;
+                break;
+            }
+            portEXIT_CRITICAL(&iter->lock);
+            iter = iter->next;
         }
-        g_vfs_kernel_entries[i].in_use = false;
-        m_vfs_file_release(g_vfs_kernel_entries[i].file);
-        g_vfs_kernel_entries[i].file = NULL;
+        portEXIT_CRITICAL(&g_vfs_job_fd_lock);
+
+        if (file == NULL) {
+            portENTER_CRITICAL(&g_vfs_kernel_lock);
+            for (size_t i = 0; i < M_VFS_KERNEL_FD_CAPACITY; ++i) {
+                if (!g_vfs_kernel_entries[i].in_use ||
+                        !_m_vfs_fd_entry_matches_mount(g_vfs_kernel_entries[i].file, mount)) {
+                    continue;
+                }
+                file = g_vfs_kernel_entries[i].file;
+                g_vfs_kernel_entries[i].in_use = false;
+                g_vfs_kernel_entries[i].file = NULL;
+                break;
+            }
+            portEXIT_CRITICAL(&g_vfs_kernel_lock);
+        }
+
+        if (file == NULL) {
+            break;
+        }
+
+        portENTER_CRITICAL(&file->lock);
+        file->closed = true;
+        portEXIT_CRITICAL(&file->lock);
+        m_vfs_file_notify_event(file);
+
+        if (file->node != NULL && file->node->fs_type != NULL &&
+                file->node->fs_type->ops != NULL &&
+                file->node->fs_type->ops->close != NULL) {
+            file->node->fs_type->ops->close(file);
+        }
+
+        m_vfs_file_release(file);
     }
-    portEXIT_CRITICAL(&g_vfs_kernel_lock);
 }

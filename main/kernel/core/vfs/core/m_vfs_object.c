@@ -303,7 +303,13 @@ m_vfs_file_wait(m_vfs_file_t *file,
     ipc_waiter_enqueue(&file->waiters, &waiter);
     portEXIT_CRITICAL(&file->wait_lock);
 
-    return ipc_waiter_block(&waiter, deadline);
+    ipc_wait_result_t result = ipc_waiter_block(&waiter, deadline);
+
+    portENTER_CRITICAL(&file->wait_lock);
+    ipc_waiter_remove(&file->waiters, &waiter);
+    portEXIT_CRITICAL(&file->wait_lock);
+
+    return result;
 }
 
 void
