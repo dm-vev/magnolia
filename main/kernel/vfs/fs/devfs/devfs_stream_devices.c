@@ -112,6 +112,12 @@ devfs_pipe_ioctl(void *private_data,
             return devfs_stream_control(&device->stream,
                                         IPC_SHM_CONTROL_RESET,
                                         NULL);
+        case DEVFS_SHM_IOCTL_BUFFER_INFO:
+            if (arg == NULL) {
+                return M_VFS_ERR_INVALID_PARAM;
+            }
+            return devfs_stream_buffer_info(&device->stream,
+                                            (devfs_shm_buffer_info_t *)arg);
         case DEVFS_IOCTL_PIPE_GET_STATS:
             if (arg == NULL) {
                 return M_VFS_ERR_INVALID_PARAM;
@@ -333,7 +339,7 @@ devfs_tty_read(void *private_data,
         return M_VFS_ERR_OK;
     }
 
-    while (!device->line_ready) {
+    while (!device->line_ready && !device->eof_pending) {
         char tmp[64];
         size_t consumed = 0;
         m_vfs_error_t err = devfs_stream_try_read(&device->stream,
@@ -349,8 +355,19 @@ devfs_tty_read(void *private_data,
         devfs_tty_process_input(device, tmp, consumed);
     }
 
-    *read = devfs_tty_deliver(device, buffer, size);
-    return M_VFS_ERR_OK;
+    if (device->line_ready && device->line_len > 0) {
+        *read = devfs_tty_deliver(device, buffer, size);
+        return M_VFS_ERR_OK;
+    }
+
+    if (device->eof_pending) {
+        device->eof_pending = false;
+        *read = 0;
+        return M_VFS_ERR_OK;
+    }
+
+    *read = 0;
+    return M_VFS_ERR_WOULD_BLOCK;
 }
 
 static m_vfs_error_t
@@ -859,7 +876,7 @@ devfs_pty_slave_read(void *private_data,
         return M_VFS_ERR_OK;
     }
 
-    while (!pair->slave_line_ready) {
+    while (!pair->slave_line_ready && !pair->slave_eof_pending) {
         char tmp[64];
         size_t consumed = 0;
         m_vfs_error_t err = devfs_stream_try_read(&pair->master_to_slave,
@@ -875,8 +892,19 @@ devfs_pty_slave_read(void *private_data,
         devfs_pty_slave_process_input(pair, tmp, consumed);
     }
 
-    *read = devfs_pty_slave_deliver(pair, buffer, size);
-    return M_VFS_ERR_OK;
+    if (pair->slave_line_ready && pair->slave_line_len > 0) {
+        *read = devfs_pty_slave_deliver(pair, buffer, size);
+        return M_VFS_ERR_OK;
+    }
+
+    if (pair->slave_eof_pending) {
+        pair->slave_eof_pending = false;
+        *read = 0;
+        return M_VFS_ERR_OK;
+    }
+
+    *read = 0;
+    return M_VFS_ERR_WOULD_BLOCK;
 }
 
 static m_vfs_error_t

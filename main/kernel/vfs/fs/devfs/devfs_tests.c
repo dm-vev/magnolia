@@ -2,7 +2,9 @@
 
 #if CONFIG_MAGNOLIA_VFS_DEVFS && CONFIG_MAGNOLIA_DEVFS_SELFTESTS
 
+#include <stdarg.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -17,6 +19,34 @@
 #include "kernel/vfs/fs/devfs/devfs_shm.h"
 
 static const char *TAG = "devfs_tests";
+static char s_devfs_test_last_error[128];
+static bool s_devfs_tests_env_ready = false;
+
+static void
+devfs_test_set_error(const char *fmt, ...)
+{
+    if (fmt == NULL) {
+        s_devfs_test_last_error[0] = '\0';
+        return;
+    }
+
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(s_devfs_test_last_error,
+              sizeof(s_devfs_test_last_error),
+              fmt,
+              args);
+    va_end(args);
+}
+
+#define DEVFS_TEST_ASSERT(cond, label, fmt, ...) \
+    do { \
+        if (!(cond)) { \
+            devfs_test_set_error(fmt, ##__VA_ARGS__); \
+            ok = false; \
+            goto label; \
+        } \
+    } while (0)
 
 static bool
 test_report(const char *name, bool success)
@@ -24,9 +54,46 @@ test_report(const char *name, bool success)
     if (success) {
         ESP_LOGI(TAG, "[PASS] %s", name);
     } else {
-        ESP_LOGE(TAG, "[FAIL] %s", name);
+        const char *reason = (s_devfs_test_last_error[0] != '\0')
+                                 ? s_devfs_test_last_error
+                                 : "unknown failure";
+        ESP_LOGE(TAG, "[FAIL] %s (%s)", name, reason);
     }
+    s_devfs_test_last_error[0] = '\0';
     return success;
+}
+
+static bool
+devfs_tests_prepare_env(const char *context)
+{
+    m_vfs_error_t err = m_vfs_init();
+    if (err != M_VFS_ERR_OK) {
+        devfs_test_set_error("%s: m_vfs_init err=%d", context, err);
+        return false;
+    }
+
+    if (s_devfs_tests_env_ready) {
+        return true;
+    }
+
+    err = m_vfs_mount("/dev", "devfs", NULL);
+    if (err != M_VFS_ERR_OK) {
+        devfs_test_set_error("%s: m_vfs_mount err=%d", context, err);
+        return false;
+    }
+
+    s_devfs_tests_env_ready = true;
+    return true;
+}
+
+static void
+devfs_tests_cleanup_env(void)
+{
+    if (!s_devfs_tests_env_ready) {
+        return;
+    }
+    m_vfs_unmount("/dev");
+    s_devfs_tests_env_ready = false;
 }
 
 static const char *const DEVFS_TEST_BLOCKING_PATH = "/dev/tests/unregister-wait";
@@ -245,12 +312,7 @@ devfs_diag_shm_capacity_cb(const devfs_diag_shm_info_t *info,
 static bool
 run_test_device_io(void)
 {
-    if (m_vfs_init() != M_VFS_ERR_OK) {
-        return false;
-    }
-
-    bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
-    if (!mounted) {
+    if (!devfs_tests_prepare_env("devfs device io")) {
         return false;
     }
 
@@ -333,22 +395,13 @@ run_test_device_io(void)
         ok = false;
     }
 
-    if (mounted) {
-        m_vfs_unmount("/dev");
-    }
-
     return ok;
 }
 
 static bool
 run_test_poll(void)
 {
-    if (m_vfs_init() != M_VFS_ERR_OK) {
-        return false;
-    }
-
-    bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
-    if (!mounted) {
+    if (!devfs_tests_prepare_env("devfs poll")) {
         return false;
     }
 
@@ -369,22 +422,13 @@ run_test_poll(void)
         ok = false;
     }
 
-    if (mounted) {
-        m_vfs_unmount("/dev");
-    }
-
     return ok;
 }
 
 static bool
 run_test_devfs_unregister_wait(void)
 {
-    if (m_vfs_init() != M_VFS_ERR_OK) {
-        return false;
-    }
-
-    bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
-    if (!mounted) {
+    if (!devfs_tests_prepare_env("devfs unregister wait")) {
         return false;
     }
 
@@ -450,21 +494,13 @@ cleanup_unregister:
     if (done != NULL) {
         vSemaphoreDelete(done);
     }
-    if (mounted) {
-        m_vfs_unmount("/dev");
-    }
     return ok;
 }
 
 static bool
 run_test_devfs_namespace(void)
 {
-    if (m_vfs_init() != M_VFS_ERR_OK) {
-        return false;
-    }
-
-    bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
-    if (!mounted) {
+    if (!devfs_tests_prepare_env("devfs namespace")) {
         return false;
     }
 
@@ -600,9 +636,6 @@ cleanup_namespace:
     if (registered_b) {
         devfs_unregister(DEVFS_TEST_NAMESPACE_B);
     }
-    if (mounted) {
-        m_vfs_unmount("/dev");
-    }
     return ok;
 }
 
@@ -610,12 +643,7 @@ cleanup_namespace:
 static bool
 run_test_devfs_pipe_basic(void)
 {
-    if (m_vfs_init() != M_VFS_ERR_OK) {
-        return false;
-    }
-
-    bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
-    if (!mounted) {
+    if (!devfs_tests_prepare_env("devfs pipe basic")) {
         return false;
     }
 
@@ -641,9 +669,6 @@ cleanup_pipe:
     if (fd >= 0) {
         m_vfs_close(NULL, fd);
     }
-    if (mounted) {
-        m_vfs_unmount("/dev");
-    }
     return ok;
 }
 #endif /* CONFIG_MAGNOLIA_DEVFS_PIPES */
@@ -652,12 +677,7 @@ cleanup_pipe:
 static bool
 run_test_devfs_tty_canonical(void)
 {
-    if (m_vfs_init() != M_VFS_ERR_OK) {
-        return false;
-    }
-
-    bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
-    if (!mounted) {
+    if (!devfs_tests_prepare_env("tty canonical")) {
         return false;
     }
 
@@ -670,36 +690,65 @@ run_test_devfs_tty_canonical(void)
     size_t read = 0;
     const uint8_t ctrl_d = 0x04;
 
-    if (m_vfs_open(NULL, "/dev/tty0", 0, &fd) != M_VFS_ERR_OK) {
-        ok = false;
-        goto cleanup_tty;
-    }
+    DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/tty0", 0, &fd) == M_VFS_ERR_OK,
+                      cleanup_tty,
+                      "tty canonical: open failed");
 
-    ok &= (m_vfs_write(NULL, fd, payload, sizeof(payload) - 1, &written) == M_VFS_ERR_OK);
-    ok &= (written == sizeof(payload) - 1);
-    ok &= (m_vfs_read(NULL, fd, sink, sizeof(expected) - 1, &read) == M_VFS_ERR_OK);
-    ok &= (read == sizeof(expected) - 1);
-    ok &= (memcmp(sink, expected, read) == 0);
+    m_vfs_error_t err = m_vfs_write(NULL,
+                                    fd,
+                                    payload,
+                                    sizeof(payload) - 1,
+                                    &written);
+    DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK && written == sizeof(payload) - 1,
+                      cleanup_tty,
+                      "tty canonical: initial write err=%d written=%u",
+                      err,
+                      (unsigned)written);
+    err = m_vfs_read(NULL, fd, sink, sizeof(expected) - 1, &read);
+    DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK && read == sizeof(expected) - 1 &&
+                      memcmp(sink, expected, read) == 0,
+                      cleanup_tty,
+                      "tty canonical: canonical read err=%d read=%u",
+                      err,
+                      (unsigned)read);
 
-    ok &= (m_vfs_write(NULL, fd, &ctrl_d, sizeof(ctrl_d), &written) == M_VFS_ERR_OK);
-    ok &= (written == sizeof(ctrl_d));
-    ok &= (m_vfs_read(NULL, fd, sink, sizeof(sink), &read) == M_VFS_ERR_OK);
-    ok &= (read == 0);
+    err = m_vfs_write(NULL, fd, &ctrl_d, sizeof(ctrl_d), &written);
+    DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK && written == sizeof(ctrl_d),
+                      cleanup_tty,
+                      "tty canonical: ctrl-d write err=%d written=%u",
+                      err,
+                      (unsigned)written);
+    err = m_vfs_read(NULL, fd, sink, sizeof(sink), &read);
+    DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK && read == 0,
+                      cleanup_tty,
+                      "tty canonical: ctrl-d read err=%d read=%u",
+                      err,
+                      (unsigned)read);
 
     bool canon = false;
-    ok &= (m_vfs_ioctl(NULL, fd, DEVFS_IOCTL_TTY_SET_CANON, &canon) == M_VFS_ERR_OK);
+    err = m_vfs_ioctl(NULL, fd, DEVFS_IOCTL_TTY_SET_CANON, &canon);
+    DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK,
+                      cleanup_tty,
+                      "tty canonical: ioctl set canon err=%d",
+                      err);
     const char raw[] = "raw-input";
-    ok &= (m_vfs_write(NULL, fd, raw, sizeof(raw) - 1, &written) == M_VFS_ERR_OK);
-    ok &= (m_vfs_read(NULL, fd, sink, sizeof(raw) - 1, &read) == M_VFS_ERR_OK);
-    ok &= (read == sizeof(raw) - 1);
-    ok &= (memcmp(sink, raw, read) == 0);
+    err = m_vfs_write(NULL, fd, raw, sizeof(raw) - 1, &written);
+    DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK && written == sizeof(raw) - 1,
+                      cleanup_tty,
+                      "tty canonical: raw write err=%d written=%u",
+                      err,
+                      (unsigned)written);
+    err = m_vfs_read(NULL, fd, sink, sizeof(raw) - 1, &read);
+    DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK && read == sizeof(raw) - 1 &&
+                      memcmp(sink, raw, read) == 0,
+                      cleanup_tty,
+                      "tty canonical: raw read err=%d read=%u",
+                      err,
+                      (unsigned)read);
 
 cleanup_tty:
     if (fd >= 0) {
         m_vfs_close(NULL, fd);
-    }
-    if (mounted) {
-        m_vfs_unmount("/dev");
     }
     return ok;
 }
@@ -709,12 +758,7 @@ cleanup_tty:
 static bool
 run_test_devfs_pty_basic(void)
 {
-    if (m_vfs_init() != M_VFS_ERR_OK) {
-        return false;
-    }
-
-    bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
-    if (!mounted) {
+    if (!devfs_tests_prepare_env("pty basic")) {
         return false;
     }
 
@@ -728,31 +772,57 @@ run_test_devfs_pty_basic(void)
     size_t written = 0;
     size_t read = 0;
 
-    if (m_vfs_open(NULL, "/dev/pty/master0", 0, &master_fd) != M_VFS_ERR_OK ||
-            m_vfs_open(NULL, "/dev/pty/slave0", 0, &slave_fd) != M_VFS_ERR_OK) {
-        ok = false;
-        goto cleanup_pty;
-    }
+    bool master_ok = (m_vfs_open(NULL, "/dev/pty/master0", 0, &master_fd) == M_VFS_ERR_OK);
+    bool slave_ok = (m_vfs_open(NULL, "/dev/pty/slave0", 0, &slave_fd) == M_VFS_ERR_OK);
+    DEVFS_TEST_ASSERT(master_ok && slave_ok,
+                      cleanup_pty,
+                      "pty basic: open master=%d slave=%d",
+                      master_ok,
+                      slave_ok);
 
-    ok &= (m_vfs_write(NULL, master_fd, master_payload, sizeof(master_payload) - 1, &written) == M_VFS_ERR_OK);
-    ok &= (written == sizeof(master_payload) - 1);
-    ok &= (m_vfs_read(NULL,
+    m_vfs_error_t err = m_vfs_write(NULL,
+                                    master_fd,
+                                    master_payload,
+                                    sizeof(master_payload) - 1,
+                                    &written);
+    DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK && written == sizeof(master_payload) - 1,
+                      cleanup_pty,
+                      "pty basic: master write err=%d written=%u",
+                      err,
+                      (unsigned)written);
+    err = m_vfs_read(NULL,
+                     slave_fd,
+                     slave_sink,
+                     sizeof(master_payload) - 1,
+                     &read);
+    DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK && read == sizeof(master_payload) - 1 &&
+                      memcmp(slave_sink, master_payload, read) == 0,
+                      cleanup_pty,
+                      "pty basic: slave read err=%d read=%u",
+                      err,
+                      (unsigned)read);
+
+    err = m_vfs_write(NULL,
                       slave_fd,
-                      slave_sink,
-                      sizeof(master_payload) - 1,
-                      &read) == M_VFS_ERR_OK);
-    ok &= (read == sizeof(master_payload) - 1);
-    ok &= (memcmp(slave_sink, master_payload, read) == 0);
-
-    ok &= (m_vfs_write(NULL, slave_fd, slave_payload, sizeof(slave_payload) - 1, &written) == M_VFS_ERR_OK);
-    ok &= (written == sizeof(slave_payload) - 1);
-    ok &= (m_vfs_read(NULL,
-                      master_fd,
-                      master_sink,
+                      slave_payload,
                       sizeof(slave_payload) - 1,
-                      &read) == M_VFS_ERR_OK);
-    ok &= (read == sizeof(slave_payload) - 1);
-    ok &= (memcmp(master_sink, slave_payload, read) == 0);
+                      &written);
+    DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK && written == sizeof(slave_payload) - 1,
+                      cleanup_pty,
+                      "pty basic: slave write err=%d written=%u",
+                      err,
+                      (unsigned)written);
+    err = m_vfs_read(NULL,
+                     master_fd,
+                     master_sink,
+                     sizeof(slave_payload) - 1,
+                     &read);
+    DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK && read == sizeof(slave_payload) - 1 &&
+                      memcmp(master_sink, slave_payload, read) == 0,
+                      cleanup_pty,
+                      "pty basic: master read err=%d read=%u",
+                      err,
+                      (unsigned)read);
 
 cleanup_pty:
     if (master_fd >= 0) {
@@ -761,9 +831,6 @@ cleanup_pty:
     if (slave_fd >= 0) {
         m_vfs_close(NULL, slave_fd);
     }
-    if (mounted) {
-        m_vfs_unmount("/dev");
-    }
     return ok;
 }
 #endif /* CONFIG_MAGNOLIA_DEVFS_PTY */
@@ -771,12 +838,7 @@ cleanup_pty:
 static bool
 run_test_devfs_extended_ops(void)
 {
-    if (m_vfs_init() != M_VFS_ERR_OK) {
-        return false;
-    }
-
-    bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
-    if (!mounted) {
+    if (!devfs_tests_prepare_env("devfs extended ops")) {
         return false;
     }
 
@@ -821,21 +883,13 @@ cleanup:
         m_vfs_close(NULL, fd);
     }
     devfs_unregister(DEVFS_TEST_EXTENDED_PATH);
-    if (mounted) {
-        m_vfs_unmount("/dev");
-    }
     return ok;
 }
 
 static bool
 run_test_devfs_fallback_ops(void)
 {
-    if (m_vfs_init() != M_VFS_ERR_OK) {
-        return false;
-    }
-
-    bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
-    if (!mounted) {
+    if (!devfs_tests_prepare_env("devfs fallback ops")) {
         return false;
     }
 
@@ -867,21 +921,13 @@ cleanup:
         m_vfs_close(NULL, fd);
     }
     devfs_unregister(DEVFS_TEST_FALLBACK_PATH);
-    if (mounted) {
-        m_vfs_unmount("/dev");
-    }
     return ok;
 }
 
 static bool
 run_test_devfs_diag_output(void)
 {
-    if (m_vfs_init() != M_VFS_ERR_OK) {
-        return false;
-    }
-
-    bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
-    if (!mounted) {
+    if (!devfs_tests_prepare_env("devfs diagnostics")) {
         return false;
     }
 
@@ -979,9 +1025,6 @@ cleanup:
     if (!unregistered) {
         devfs_unregister(DEVFS_TEST_DIAG_WAIT_PATH);
     }
-    if (mounted) {
-        m_vfs_unmount("/dev");
-    }
     return ok;
 }
 
@@ -1027,12 +1070,7 @@ devfs_shm_writer_task(void *arg)
 static bool
 run_test_shm_pipe_concurrent(void)
 {
-    if (m_vfs_init() != M_VFS_ERR_OK) {
-        return false;
-    }
-
-    bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
-    if (!mounted) {
+    if (!devfs_tests_prepare_env("shm concurrent")) {
         return false;
     }
 
@@ -1041,21 +1079,16 @@ run_test_shm_pipe_concurrent(void)
     int writer_fd = -1;
     const uint8_t payload[] = "shmpipe";
 
-    if (m_vfs_open(NULL, "/dev/pipe0", 0, &reader_fd) != M_VFS_ERR_OK) {
-        ok = false;
-        goto cleanup;
-    }
+    DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/pipe0", 0, &reader_fd) == M_VFS_ERR_OK,
+                      cleanup,
+                      "shm concurrent: open reader failed");
 
-    if (m_vfs_open(NULL, "/dev/pipe0", 0, &writer_fd) != M_VFS_ERR_OK) {
-        ok = false;
-        goto cleanup;
-    }
+    DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/pipe0", 0, &writer_fd) == M_VFS_ERR_OK,
+                      cleanup,
+                      "shm concurrent: open writer failed");
 
     SemaphoreHandle_t done = xSemaphoreCreateBinary();
-    if (done == NULL) {
-        ok = false;
-        goto cleanup;
-    }
+    DEVFS_TEST_ASSERT(done != NULL, cleanup, "shm concurrent: semaphore alloc failed");
 
     devfs_shm_writer_ctx_t ctx = {
         .fd = writer_fd,
@@ -1072,8 +1105,9 @@ run_test_shm_pipe_concurrent(void)
                     &ctx,
                     tskIDLE_PRIORITY + 1,
                     NULL) != pdPASS) {
-        ok = false;
+        ESP_LOGE(TAG, "shm concurrent: writer task create failed");
         vSemaphoreDelete(done);
+        ok = false;
         goto cleanup;
     }
 
@@ -1084,11 +1118,17 @@ run_test_shm_pipe_concurrent(void)
                                    buffer,
                                    sizeof(payload),
                                    &read);
-    ok &= (err == M_VFS_ERR_OK && read == sizeof(payload));
-    ok &= (memcmp(buffer, payload, read) == 0);
-    ok &= (xSemaphoreTake(done, pdMS_TO_TICKS(1000)) == pdTRUE);
+    DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK && read == sizeof(payload) &&
+                      memcmp(buffer, payload, read) == 0,
+                      cleanup,
+                      "shm concurrent: read err=%d read=%u",
+                      err,
+                      (unsigned)read);
+    DEVFS_TEST_ASSERT(xSemaphoreTake(done, pdMS_TO_TICKS(1000)) == pdTRUE,
+                      cleanup,
+                      "shm concurrent: writer completion timeout");
     vSemaphoreDelete(done);
-    ok &= ctx.success;
+    DEVFS_TEST_ASSERT(ctx.success, cleanup, "shm concurrent: writer failed");
 
 cleanup:
     if (reader_fd >= 0) {
@@ -1097,37 +1137,29 @@ cleanup:
     if (writer_fd >= 0) {
         m_vfs_close(NULL, writer_fd);
     }
-    if (mounted) {
-        m_vfs_unmount("/dev");
-    }
     return ok;
 }
 
 static bool
 run_test_shm_pipe_timeout(void)
 {
-    if (m_vfs_init() != M_VFS_ERR_OK) {
-        return false;
-    }
-
-    bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
-    if (!mounted) {
+    if (!devfs_tests_prepare_env("shm timeout")) {
         return false;
     }
 
     bool ok = true;
     int fd = -1;
-    if (m_vfs_open(NULL, "/dev/pipe0", 0, &fd) != M_VFS_ERR_OK) {
-        ok = false;
-        goto cleanup;
-    }
+    DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/pipe0", 0, &fd) == M_VFS_ERR_OK,
+                      cleanup,
+                      "shm timeout: open failed");
 
     devfs_shm_buffer_info_t info = {0};
-    ok &= (m_vfs_ioctl(NULL, fd, DEVFS_SHM_IOCTL_BUFFER_INFO, &info) == M_VFS_ERR_OK);
-    if (info.capacity == 0) {
-        ok = false;
-        goto cleanup;
-    }
+    m_vfs_error_t err = m_vfs_ioctl(NULL, fd, DEVFS_SHM_IOCTL_BUFFER_INFO, &info);
+    DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK && info.capacity > 0,
+                      cleanup,
+                      "shm timeout: buffer info err=%d capacity=%u",
+                      err,
+                      (unsigned)info.capacity);
 
     uint8_t chunk[32];
     memset(chunk, 0xAB, sizeof(chunk));
@@ -1136,7 +1168,12 @@ run_test_shm_pipe_timeout(void)
         size_t chunk_size = (remaining > sizeof(chunk)) ? sizeof(chunk) : remaining;
         size_t written = 0;
         m_vfs_error_t write_err = m_vfs_write(NULL, fd, chunk, chunk_size, &written);
-        ok &= (write_err == M_VFS_ERR_OK && written == chunk_size);
+        DEVFS_TEST_ASSERT(write_err == M_VFS_ERR_OK && written == chunk_size,
+                          cleanup,
+                          "shm timeout: fill write err=%d written=%u chunk=%u",
+                          write_err,
+                          (unsigned)written,
+                          (unsigned)chunk_size);
         remaining -= written;
     }
 
@@ -1148,23 +1185,32 @@ run_test_shm_pipe_timeout(void)
                                                 1,
                                                 &extra_written,
                                                 &deadline);
-    ok &= (timed_err == M_VFS_ERR_TIMEOUT && extra_written == 0);
+    DEVFS_TEST_ASSERT(timed_err == M_VFS_ERR_TIMEOUT && extra_written == 0,
+                      cleanup,
+                      "shm timeout: timed write err=%d written=%u",
+                      timed_err,
+                      (unsigned)extra_written);
 
     uint8_t tmp = 0;
     size_t read = 0;
     m_vfs_error_t read_err = m_vfs_read(NULL, fd, &tmp, 1, &read);
-    ok &= (read_err == M_VFS_ERR_OK && read == 1);
+    DEVFS_TEST_ASSERT(read_err == M_VFS_ERR_OK && read == 1,
+                      cleanup,
+                      "shm timeout: drain read err=%d read=%u",
+                      read_err,
+                      (unsigned)read);
 
     size_t final_written = 0;
-    ok &= (m_vfs_write(NULL, fd, "X", 1, &final_written) == M_VFS_ERR_OK);
-    ok &= (final_written == 1);
+    err = m_vfs_write(NULL, fd, "X", 1, &final_written);
+    DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK && final_written == 1,
+                      cleanup,
+                      "shm timeout: final write err=%d written=%u",
+                      err,
+                      (unsigned)final_written);
 
 cleanup:
     if (fd >= 0) {
         m_vfs_close(NULL, fd);
-    }
-    if (mounted) {
-        m_vfs_unmount("/dev");
     }
     return ok;
 }
@@ -1172,31 +1218,28 @@ cleanup:
 static bool
 run_test_shm_stream_drop(void)
 {
-    if (m_vfs_init() != M_VFS_ERR_OK) {
-        return false;
-    }
-
-    bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
-    if (!mounted) {
+    if (!devfs_tests_prepare_env("shm drop")) {
         return false;
     }
 
     bool ok = true;
     int fd = -1;
-    if (m_vfs_open(NULL, "/dev/stream0", 0, &fd) != M_VFS_ERR_OK) {
-        ok = false;
-        goto cleanup;
-    }
+    DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/stream0", 0, &fd) == M_VFS_ERR_OK,
+                      cleanup,
+                      "shm drop: open failed");
 
+    uint8_t payload[512];
     devfs_shm_buffer_info_t info = {0};
-    ok &= (m_vfs_ioctl(NULL, fd, DEVFS_SHM_IOCTL_BUFFER_INFO, &info) == M_VFS_ERR_OK);
-    if (info.capacity == 0 || info.capacity * 2 > 512) {
-        ok = false;
-        goto cleanup;
-    }
+    m_vfs_error_t err = m_vfs_ioctl(NULL, fd, DEVFS_SHM_IOCTL_BUFFER_INFO, &info);
+    DEVFS_TEST_ASSERT(err == M_VFS_ERR_OK &&
+                      info.capacity > 0 &&
+                      info.capacity * 2 <= sizeof(payload),
+                      cleanup,
+                      "shm drop: buffer info err=%d capacity=%u",
+                      err,
+                      (unsigned)info.capacity);
 
     size_t total = info.capacity * 2;
-    uint8_t payload[512];
     for (size_t i = 0; i < total; ++i) {
         payload[i] = (uint8_t)i;
     }
@@ -1209,7 +1252,12 @@ run_test_shm_stream_drop(void)
                                               payload + offset,
                                               chunk_size,
                                               &written);
-        ok &= (write_err == M_VFS_ERR_OK && written == chunk_size);
+        DEVFS_TEST_ASSERT(write_err == M_VFS_ERR_OK && written == chunk_size,
+                          cleanup,
+                          "shm drop: write err=%d written=%u chunk=%u",
+                          write_err,
+                          (unsigned)written,
+                          (unsigned)chunk_size);
         offset += written;
     }
 
@@ -1217,19 +1265,26 @@ run_test_shm_stream_drop(void)
     size_t read = 0;
     m_vfs_error_t read_err =
             m_vfs_read(NULL, fd, result, info.capacity, &read);
-    ok &= (read_err == M_VFS_ERR_OK && read == info.capacity);
+    DEVFS_TEST_ASSERT(read_err == M_VFS_ERR_OK && read == info.capacity,
+                      cleanup,
+                      "shm drop: read err=%d read=%u expected=%u",
+                      read_err,
+                      (unsigned)read,
+                      (unsigned)info.capacity);
 
     size_t start = total - info.capacity;
     for (size_t i = 0; i < info.capacity; ++i) {
-        ok &= (result[i] == payload[start + i]);
+        DEVFS_TEST_ASSERT(result[i] == payload[start + i],
+                          cleanup,
+                          "shm drop: mismatch idx=%u got=%u expected=%u",
+                          (unsigned)i,
+                          result[i],
+                          payload[start + i]);
     }
 
 cleanup:
     if (fd >= 0) {
         m_vfs_close(NULL, fd);
-    }
-    if (mounted) {
-        m_vfs_unmount("/dev");
     }
     return ok;
 }
@@ -1237,32 +1292,22 @@ cleanup:
 static bool
 run_test_shm_poll_notify(void)
 {
-    if (m_vfs_init() != M_VFS_ERR_OK) {
-        return false;
-    }
-
-    bool mounted = (m_vfs_mount("/dev", "devfs", NULL) == M_VFS_ERR_OK);
-    if (!mounted) {
+    if (!devfs_tests_prepare_env("shm poll")) {
         return false;
     }
 
     bool ok = true;
     int reader_fd = -1;
     int writer_fd = -1;
-    if (m_vfs_open(NULL, "/dev/pipe0", 0, &reader_fd) != M_VFS_ERR_OK) {
-        ok = false;
-        goto cleanup;
-    }
-    if (m_vfs_open(NULL, "/dev/pipe0", 0, &writer_fd) != M_VFS_ERR_OK) {
-        ok = false;
-        goto cleanup;
-    }
+    DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/pipe0", 0, &reader_fd) == M_VFS_ERR_OK,
+                      cleanup,
+                      "shm poll: open reader failed");
+    DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/pipe0", 0, &writer_fd) == M_VFS_ERR_OK,
+                      cleanup,
+                      "shm poll: open writer failed");
 
     SemaphoreHandle_t done = xSemaphoreCreateBinary();
-    if (done == NULL) {
-        ok = false;
-        goto cleanup;
-    }
+    DEVFS_TEST_ASSERT(done != NULL, cleanup, "shm poll: semaphore alloc failed");
 
     const uint8_t payload[] = "poll";
     devfs_shm_writer_ctx_t ctx = {
@@ -1280,8 +1325,9 @@ run_test_shm_poll_notify(void)
                     &ctx,
                     tskIDLE_PRIORITY + 1,
                     NULL) != pdPASS) {
-        ok = false;
+        ESP_LOGE(TAG, "shm poll: writer task create failed");
         vSemaphoreDelete(done);
+        ok = false;
         goto cleanup;
     }
 
@@ -1296,16 +1342,27 @@ run_test_shm_poll_notify(void)
                                         1,
                                         &deadline,
                                         &ready);
-    ok &= (poll_err == M_VFS_ERR_OK && ready == 1);
-    ok &= ((poll_fd.revents & M_VFS_POLLIN) != 0);
+    DEVFS_TEST_ASSERT(poll_err == M_VFS_ERR_OK && ready == 1 &&
+                      (poll_fd.revents & M_VFS_POLLIN) != 0,
+                      cleanup,
+                      "shm poll: poll err=%d ready=%u revents=0x%x",
+                      poll_err,
+                      (unsigned)ready,
+                      poll_fd.revents);
 
     size_t read = 0;
     uint8_t sink[16] = {0};
-    ok &= (m_vfs_read(NULL, reader_fd, sink, sizeof(payload), &read) == M_VFS_ERR_OK);
-    ok &= (read == sizeof(payload));
-    ok &= (xSemaphoreTake(done, pdMS_TO_TICKS(1000)) == pdTRUE);
+    m_vfs_error_t read_err = m_vfs_read(NULL, reader_fd, sink, sizeof(payload), &read);
+    DEVFS_TEST_ASSERT(read_err == M_VFS_ERR_OK && read == sizeof(payload),
+                      cleanup,
+                      "shm poll: read err=%d read=%u",
+                      read_err,
+                      (unsigned)read);
+    DEVFS_TEST_ASSERT(xSemaphoreTake(done, pdMS_TO_TICKS(1000)) == pdTRUE,
+                      cleanup,
+                      "shm poll: writer completion timeout");
     vSemaphoreDelete(done);
-    ok &= ctx.success;
+    DEVFS_TEST_ASSERT(ctx.success, cleanup, "shm poll: writer failed");
 
 cleanup:
     if (reader_fd >= 0) {
@@ -1313,9 +1370,6 @@ cleanup:
     }
     if (writer_fd >= 0) {
         m_vfs_close(NULL, writer_fd);
-    }
-    if (mounted) {
-        m_vfs_unmount("/dev");
     }
     return ok;
 }
@@ -1360,6 +1414,7 @@ devfs_selftests_run(void)
                            run_test_shm_poll_notify());
 #endif
     ESP_LOGI(TAG, "devfs self-tests %s", overall ? "PASSED" : "FAILED");
+    devfs_tests_cleanup_env();
 }
 
 #else
