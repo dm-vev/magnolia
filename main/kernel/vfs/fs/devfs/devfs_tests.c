@@ -1833,12 +1833,13 @@ run_stress_pipe_close_race(void)
     bool ok = true;
     for (size_t i = 0; i < 20; ++i) {
         int fd = -1;
+        SemaphoreHandle_t done = NULL;
         DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/pipe0", 0, &fd) == M_VFS_ERR_OK,
                           cleanup_iter,
                           "pipe close race: open failed iter=%u",
                           (unsigned)i);
 
-        SemaphoreHandle_t done = xSemaphoreCreateBinary();
+        done = xSemaphoreCreateBinary();
         DEVFS_TEST_ASSERT(done != NULL,
                           cleanup_iter,
                           "pipe close race: sem alloc failed iter=%u",
@@ -1902,12 +1903,13 @@ run_stress_shm_stream_close_race(void)
     bool ok = true;
     for (size_t i = 0; i < 20; ++i) {
         int fd = -1;
+        SemaphoreHandle_t done = NULL;
         DEVFS_TEST_ASSERT(m_vfs_open(NULL, "/dev/stream0", 0, &fd) == M_VFS_ERR_OK,
                           cleanup_iter,
                           "shm stream close race: open failed iter=%u",
                           (unsigned)i);
 
-        SemaphoreHandle_t done = xSemaphoreCreateBinary();
+        done = xSemaphoreCreateBinary();
         DEVFS_TEST_ASSERT(done != NULL,
                           cleanup_iter,
                           "shm stream close race: sem alloc failed iter=%u",
