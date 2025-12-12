@@ -186,9 +186,25 @@ config MAGNOLIA_LITTLEFS_ENABLED
     default y
     depends on MAGNOLIA_VFS_ENABLED
     help
-        Include Magnolia's LittleFS adapter so SPI-Flash backed storage can be
-        mounted through the Magnolia VFS. The driver is purely in-memory and
-        uses the bundled LittleFS source to expose a Copy-On-Write filesystem.
+        Include Magnolia's LittleFS adapter so a flash partition can be mounted
+        through the Magnolia VFS. The driver uses ESP-IDF esp_partition APIs as
+        the backing block device.
+
+config MAGNOLIA_LITTLEFS_PARTITION_LABEL
+    string "LittleFS partition label"
+    default "vfs"
+    depends on MAGNOLIA_LITTLEFS_ENABLED
+    help
+        Label of the data partition that LittleFS should mount. The partition
+        must exist in partitions.csv.
+
+config MAGNOLIA_LITTLEFS_FORMAT_IF_FAIL
+    bool "Format partition if mount fails"
+    default y
+    depends on MAGNOLIA_LITTLEFS_ENABLED
+    help
+        If enabled and the mount fails due to an empty or corrupt filesystem,
+        the driver will format the partition and retry the mount.
 
 config MAGNOLIA_LITTLEFS_BLOCK_SIZE
     int "Logical block size"
@@ -245,11 +261,20 @@ config MAGNOLIA_LITTLEFS_BLOCK_CYCLES
 config MAGNOLIA_LITTLEFS_ERASE_BLOCKS
     int "Erase blocks per operation"
     range 1 16
-    default 4
+    default 1
     depends on MAGNOLIA_LITTLEFS_ENABLED
     help
-        Number of blocks that will be erased during each backend erase call.
-        The backend currently erases a single logical block at a time.
+        Kept for compatibility with the old RAM backend. The flash backend
+        erases exactly one logical block per erase callback.
+
+config MAGNOLIA_LITTLEFS_LOCK_TIMEOUT_MS
+    int "LittleFS lock timeout (ms)"
+    range 10 60000
+    default 2000
+    depends on MAGNOLIA_LITTLEFS_ENABLED
+    help
+        Maximum time a VFS operation will wait to acquire the filesystem lock
+        before returning M_VFS_ERR_TIMEOUT.
 
 config MAGNOLIA_VFS_LITTLEFS_SELFTESTS
     bool "Enable LittleFS selftests"
@@ -258,5 +283,37 @@ config MAGNOLIA_VFS_LITTLEFS_SELFTESTS
     help
         Build the LittleFS self-tests that exercise mounting, formatting, and
         IO operations through the Magnolia VFS layer.
+
+config MAGNOLIA_LITTLEFS_TEST_LOG_IO
+    bool "Log LittleFS flash IO during selftests"
+    default y
+    depends on MAGNOLIA_VFS_LITTLEFS_SELFTESTS
+    help
+        When enabled, the LittleFS flash backend logs every read/program/erase
+        callback with block numbers and absolute addresses. Intended for bring-up.
+
+config MAGNOLIA_LITTLEFS_TEST_DESTRUCTIVE
+    bool "Allow destructive LittleFS selftests"
+    default y
+    depends on MAGNOLIA_VFS_LITTLEFS_SELFTESTS
+    help
+        Selftests may erase/write the first erase block and force-format the
+        partition. Disable for production devices with valuable data.
+
+config MAGNOLIA_LITTLEFS_TEST_WEAR_CYCLES
+    int "Wear test cycles"
+    range 10 100000
+    default 200
+    depends on MAGNOLIA_VFS_LITTLEFS_SELFTESTS
+    help
+        Number of create/write/delete cycles to run in the wear test phase.
+
+config MAGNOLIA_LITTLEFS_TEST_POWERLOSS
+    bool "Enable power-loss reboot simulation"
+    default n
+    depends on MAGNOLIA_VFS_LITTLEFS_SELFTESTS
+    help
+        If enabled, the power-loss test will trigger esp_restart() mid-write and
+        validate consistency on next boot using a marker file.
 
 endmenu

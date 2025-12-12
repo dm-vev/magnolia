@@ -3,11 +3,14 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
 
 #include "sdkconfig.h"
+#include "esp_log.h"
+#include "esp_partition.h"
 #include "kernel/core/job/m_job_core.h"
 #include "kernel/core/vfs/core/m_vfs_jobcwd.h"
 #include "kernel/core/ipc/ipc_scheduler_bridge.h"
@@ -32,6 +35,32 @@
 #endif
 
 static bool g_vfs_initialized;
+
+static void
+_m_vfs_log_partitions(void)
+{
+    static const char *TAG = "vfs_partitions";
+
+    esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_ANY,
+                                                     ESP_PARTITION_SUBTYPE_ANY,
+                                                     NULL);
+    if (it == NULL) {
+        ESP_LOGW(TAG, "no partitions found");
+        return;
+    }
+
+    ESP_LOGI(TAG, "available partitions:");
+    while (it != NULL) {
+        const esp_partition_t *p = esp_partition_get(it);
+        if (p != NULL) {
+            ESP_LOGI(TAG,
+                     "label=%s type=0x%02x subtype=0x%02x addr=0x%08"PRIx32" size=%"PRIu32" erase=%"PRIu32,
+                     p->label, p->type, p->subtype, p->address, p->size, p->erase_size);
+        }
+        it = esp_partition_next(it);
+    }
+    esp_partition_iterator_release(it);
+}
 
 static bool
 _m_vfs_should_inject(m_vfs_error_t *out)
@@ -360,6 +389,8 @@ m_vfs_init(void)
         m_vfs_fs_type_register(littlefs);
     }
 #endif
+
+    _m_vfs_log_partitions();
 
     g_vfs_initialized = true;
     return M_VFS_ERR_OK;

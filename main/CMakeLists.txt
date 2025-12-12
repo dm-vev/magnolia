@@ -126,6 +126,11 @@ if(CONFIG_MAGNOLIA_VFS_ENABLED)
             "kernel/vfs/fs/littlefs/littlefs_fs.c"
             "kernel/vfs/fs/littlefs/lfs_backend_flash.c"
         )
+        if(CONFIG_MAGNOLIA_VFS_LITTLEFS_SELFTESTS)
+            list(APPEND APP_SRCS
+                "kernel/vfs/fs/littlefs/littlefs_tests.c"
+            )
+        endif()
     endif()
 endif()
 
@@ -170,8 +175,37 @@ endif()
 if(CONFIG_MAGNOLIA_ALLOC_ENABLED AND CONFIG_MAGNOLIA_ALLOC_SELFTESTS)
     list(APPEND APP_SRCS "kernel/core/memory/tests/m_alloc_tests.c")
 endif()
+
+if(CONFIG_MAGNOLIA_ELF_ENABLED)
+    list(APPEND APP_SRCS
+        "kernel/core/elf/m_elf_loader.c"
+        "kernel/core/elf/m_elf_platform.c"
+        "kernel/core/elf/m_elf_symbol.c"
+    )
+
+    if(CONFIG_IDF_TARGET_ARCH_XTENSA)
+        list(APPEND APP_SRCS "kernel/arch/elf/m_elf_xtensa.c")
+    elseif(CONFIG_IDF_TARGET_ARCH_RISCV)
+        list(APPEND APP_SRCS "kernel/arch/elf/m_elf_riscv.c")
+    endif()
+
+    if(CONFIG_MAGNOLIA_ELF_SELFTESTS)
+        list(APPEND APP_SRCS "kernel/core/elf/tests/m_elf_tests.c")
+
+        if(CONFIG_IDF_TARGET_ARCH_XTENSA)
+            set(KERNEL_TEST_ELF "kernel/core/elf/tests/kernel_test_xtensa.elf")
+        elseif(CONFIG_IDF_TARGET_ARCH_RISCV)
+            set(KERNEL_TEST_ELF "kernel/core/elf/tests/kernel_test_riscv.elf")
+        endif()
+
+        if(KERNEL_TEST_ELF AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/${KERNEL_TEST_ELF}")
+            list(APPEND APP_EMBED_TXTFILES "${KERNEL_TEST_ELF}")
+        endif()
+    endif()
+endif()
 idf_component_register(
     SRCS ${APP_SRCS}
+    EMBED_TXTFILES ${APP_EMBED_TXTFILES}
     INCLUDE_DIRS
         "."
         "kernel/core/timer"
@@ -179,6 +213,7 @@ idf_component_register(
         "kernel/core/job"
         "kernel/core/ipc"
         "kernel/core/memory"
+        "kernel/core/elf"
         "kernel/core/vfs"
         "kernel/vfs"
         "lib"

@@ -17,6 +17,7 @@ source "../main/kernel/core/sched/Kconfig.sched"
 source "../main/kernel/core/timer/Kconfig.timer"
 source "../main/kernel/core/memory/Kconfig.memory"
 
+source "../main/kernel/core/elf/Kconfig.elf"
 source "../main/kernel/core/job/Kconfig.job"
 source "../main/kernel/core/vfs/Kconfig.vfs"
 source "../main/kernel/vfs/fs/devfs/Kconfig.devfs"

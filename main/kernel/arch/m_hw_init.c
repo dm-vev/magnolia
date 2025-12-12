@@ -13,8 +13,14 @@
 #if CONFIG_MAGNOLIA_VFS_DEVFS && CONFIG_MAGNOLIA_DEVFS_SELFTESTS
 #include "kernel/vfs/fs/devfs/devfs_tests.h"
 #endif
+#if CONFIG_MAGNOLIA_LITTLEFS_ENABLED && CONFIG_MAGNOLIA_VFS_LITTLEFS_SELFTESTS
+#include "kernel/vfs/fs/littlefs/littlefs_tests.h"
+#endif
 #if CONFIG_MAGNOLIA_ALLOC_ENABLED && CONFIG_MAGNOLIA_ALLOC_SELFTESTS
 #include "kernel/core/memory/tests/m_alloc_tests.h"
+#endif
+#if CONFIG_MAGNOLIA_ELF_ENABLED && CONFIG_MAGNOLIA_ELF_SELFTESTS
+#include "kernel/core/elf/tests/m_elf_tests.h"
 #endif
 
 void magnolia_hw_init(void)
@@ -46,5 +52,13 @@ void magnolia_hw_init(void)
 
 #if CONFIG_MAGNOLIA_VFS_DEVFS && CONFIG_MAGNOLIA_DEVFS_SELFTESTS
     devfs_selftests_run();
+#endif
+
+#if CONFIG_MAGNOLIA_LITTLEFS_ENABLED && CONFIG_MAGNOLIA_VFS_LITTLEFS_SELFTESTS
+    littlefs_selftests_run();
+#endif
+
+#if CONFIG_MAGNOLIA_ELF_ENABLED && CONFIG_MAGNOLIA_ELF_SELFTESTS
+    m_elf_selftests_run();
 #endif
 }

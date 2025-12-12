@@ -164,43 +164,84 @@ static int copy_directory(lfs_t *lfs, const char *host_base, const char *relativ
         return -errno;
     }
 
+    /* Collect entries and sort by name for deterministic images. */
+    size_t entry_count = 0;
+    size_t entry_cap = 0;
+    char **names = NULL;
+
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
         }
+        if (entry_count == entry_cap) {
+            size_t new_cap = entry_cap ? entry_cap * 2 : 16;
+            char **new_names = realloc(names, new_cap * sizeof(*new_names));
+            if (!new_names) {
+                closedir(dir);
+                for (size_t i = 0; i < entry_count; ++i) {
+                    free(names[i]);
+                }
+                free(names);
+                return -LFS_ERR_NOMEM;
+            }
+            names = new_names;
+            entry_cap = new_cap;
+        }
+        names[entry_count] = strdup(entry->d_name);
+        if (!names[entry_count]) {
+            closedir(dir);
+            for (size_t i = 0; i < entry_count; ++i) {
+                free(names[i]);
+            }
+            free(names);
+            return -LFS_ERR_NOMEM;
+        }
+        ++entry_count;
+    }
+    closedir(dir);
+
+    if (entry_count > 1) {
+        int cmp(const void *a, const void *b) {
+            const char *sa = *(const char * const *)a;
+            const char *sb = *(const char * const *)b;
+            return strcmp(sa, sb);
+        }
+        qsort(names, entry_count, sizeof(*names), cmp);
+    }
+
+    for (size_t n = 0; n < entry_count; ++n) {
+        const char *name = names[n];
 
         char child_relative[PATH_MAX];
         int needed;
         if (relative[0] == '\0') {
-            needed = snprintf(child_relative, sizeof(child_relative), "%s", entry->d_name);
+            needed = snprintf(child_relative, sizeof(child_relative), "%s", name);
         } else {
-            needed = snprintf(child_relative, sizeof(child_relative), "%s/%s", relative, entry->d_name);
+            needed = snprintf(child_relative, sizeof(child_relative), "%s/%s", relative, name);
         }
         if (needed < 0 || (size_t)needed >= sizeof(child_relative)) {
-            closedir(dir);
-            return -LFS_ERR_NOMEM;
+            res = -LFS_ERR_NOMEM;
+            break;
         }
 
         char child_host[PATH_MAX];
         res = join_path(child_host, sizeof(child_host), host_base, child_relative);
         if (res < 0) {
-            closedir(dir);
-            return res;
+            break;
         }
 
         struct stat st;
         if (stat(child_host, &st) != 0) {
-            closedir(dir);
-            return -errno;
+            res = -errno;
+            break;
         }
 
         if (S_ISDIR(st.st_mode)) {
             char lfs_dir_path[PATH_MAX];
             res = build_lfs_path(lfs_dir_path, sizeof(lfs_dir_path), child_relative);
             if (res < 0) {
-                closedir(dir);
-                return res;
+                break;
             }
 
             if (verbose) {
@@ -209,28 +250,30 @@ static int copy_directory(lfs_t *lfs, const char *host_base, const char *relativ
 
             int mkdir_res = lfs_mkdir(lfs, lfs_dir_path);
             if (mkdir_res < 0 && mkdir_res != LFS_ERR_EXIST) {
-                closedir(dir);
-                return mkdir_res;
+                res = mkdir_res;
+                break;
             }
 
             res = copy_directory(lfs, host_base, child_relative, verbose);
             if (res < 0) {
-                closedir(dir);
-                return res;
+                break;
             }
         } else if (S_ISREG(st.st_mode)) {
             res = copy_file(lfs, child_host, child_relative, verbose);
             if (res < 0) {
-                closedir(dir);
-                return res;
+                break;
             }
         } else if (verbose) {
             fprintf(stderr, "skip %s (not a regular file or directory)\n", child_host);
         }
     }
 
-    closedir(dir);
-    return 0;
+    for (size_t i = 0; i < entry_count; ++i) {
+        free(names[i]);
+    }
+    free(names);
+
+    return res;
 }
 
 static bool parse_size(const char *value, size_t *output)

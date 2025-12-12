@@ -4,11 +4,16 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
+#include "freertos/semphr.h"
 
 #include "sdkconfig.h"
+
+#include "esp_log.h"
+#include "esp_partition.h"
 
 #include "kernel/core/vfs/core/m_vfs_errno.h"
 #include "kernel/core/vfs/core/m_vfs_object.h"
@@ -30,7 +35,8 @@ m_littlefs_fs_type(void)
 typedef struct {
     lfs_t lfs;
     struct lfs_config cfg;
-    portMUX_TYPE lock;
+    SemaphoreHandle_t lock;
+    littlefs_flash_ctx_t *flash;
 } littlefs_mount_data_t;
 
 typedef struct {
@@ -41,6 +47,7 @@ typedef struct {
 typedef struct {
     lfs_file_t file;
     littlefs_mount_data_t *mount;
+    bool is_dir;
 } littlefs_file_data_t;
 
 static const struct m_vfs_fs_ops s_littlefs_ops;
@@ -63,6 +70,52 @@ littlefs_path_for_lfs(const char *path)
         return ".";
     }
     return path;
+}
+
+static void
+littlefs_log_partitions(void)
+{
+    esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_ANY,
+                                                     ESP_PARTITION_SUBTYPE_ANY,
+                                                     NULL);
+    if (it == NULL) {
+        ESP_LOGW("littlefs", "no partitions found");
+        return;
+    }
+
+    ESP_LOGI("littlefs", "available partitions:");
+    while (it != NULL) {
+        const esp_partition_t *p = esp_partition_get(it);
+        if (p != NULL) {
+            ESP_LOGI("littlefs",
+                     "label=%s type=0x%02x subtype=0x%02x addr=0x%08"PRIx32" size=%"PRIu32" erase=%"PRIu32,
+                     p->label, p->type, p->subtype, p->address, p->size, p->erase_size);
+        }
+        it = esp_partition_next(it);
+    }
+    esp_partition_iterator_release(it);
+}
+
+static bool
+littlefs_lock_take(littlefs_mount_data_t *data)
+{
+    if (data == NULL || data->lock == NULL) {
+        return false;
+    }
+    TickType_t ticks = pdMS_TO_TICKS(CONFIG_MAGNOLIA_LITTLEFS_LOCK_TIMEOUT_MS);
+    if (ticks == 0) {
+        ticks = 1;
+    }
+    return xSemaphoreTake(data->lock, ticks) == pdTRUE;
+}
+
+static void
+littlefs_lock_give(littlefs_mount_data_t *data)
+{
+    if (data == NULL || data->lock == NULL) {
+        return;
+    }
+    xSemaphoreGive(data->lock);
 }
 
 static bool
@@ -124,9 +177,12 @@ littlefs_file_destroy(m_vfs_file_t *file)
 
     littlefs_file_data_t *data = file->fs_private;
     if (data->mount != NULL) {
-        portENTER_CRITICAL(&data->mount->lock);
-        lfs_file_close(&data->mount->lfs, &data->file);
-        portEXIT_CRITICAL(&data->mount->lock);
+        if (!data->is_dir) {
+            if (littlefs_lock_take(data->mount)) {
+                lfs_file_close(&data->mount->lfs, &data->file);
+                littlefs_lock_give(data->mount);
+            }
+        }
     }
     vPortFree(data);
     file->fs_private = NULL;
@@ -193,9 +249,11 @@ littlefs_lookup_node(m_vfs_mount_t *mount,
     }
 
     struct lfs_info info;
-    portENTER_CRITICAL(&data->lock);
+    if (!littlefs_lock_take(data)) {
+        return M_VFS_ERR_TIMEOUT;
+    }
     int err = lfs_stat(&data->lfs, littlefs_path_for_lfs(child_path), &info);
-    portEXIT_CRITICAL(&data->lock);
+    littlefs_lock_give(data);
     if (err < 0) {
         return littlefs_error_translate(err);
     }
@@ -231,16 +289,84 @@ littlefs_mount(m_vfs_mount_t *mount,
         return M_VFS_ERR_NO_MEMORY;
     }
 
-    data->lock = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
-    data->cfg.context = data;
+    memset(data, 0, sizeof(*data));
+    data->lock = xSemaphoreCreateMutex();
+    if (data->lock == NULL) {
+        vPortFree(data);
+        return M_VFS_ERR_NO_MEMORY;
+    }
+
+    const char *label = NULL;
+    if (mount_opts != NULL && mount_opts->partition_label != NULL &&
+        mount_opts->partition_label[0] != '\0') {
+        label = mount_opts->partition_label;
+    } else if (CONFIG_MAGNOLIA_LITTLEFS_PARTITION_LABEL[0] != '\0') {
+        label = CONFIG_MAGNOLIA_LITTLEFS_PARTITION_LABEL;
+    }
+
+    if (label == NULL) {
+        vSemaphoreDelete(data->lock);
+        vPortFree(data);
+        return M_VFS_ERR_INVALID_PARAM;
+    }
+
+    const esp_partition_t *part = esp_partition_find_first(
+            ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, label);
+    if (part == NULL) {
+        ESP_LOGE("littlefs", "partition '%s' not found", label);
+        littlefs_log_partitions();
+        vSemaphoreDelete(data->lock);
+        vPortFree(data);
+        return M_VFS_ERR_NOT_FOUND;
+    }
+
+    littlefs_flash_ctx_t *ctx = pvPortMalloc(sizeof(*ctx));
+    if (ctx == NULL) {
+        vSemaphoreDelete(data->lock);
+        vPortFree(data);
+        return M_VFS_ERR_NO_MEMORY;
+    }
+
+    uint32_t erase_size = part->erase_size;
+    uint32_t block_size = CONFIG_MAGNOLIA_LITTLEFS_BLOCK_SIZE;
+    if (erase_size == 0) {
+        erase_size = 4096;
+    }
+    if (block_size < erase_size || (block_size % erase_size) != 0) {
+        ESP_LOGW("littlefs", "block_size %u invalid for erase_size %u, using %u",
+                 (unsigned)block_size, (unsigned)erase_size, (unsigned)erase_size);
+        block_size = erase_size;
+    }
+    uint32_t max_blocks = part->size / block_size;
+    uint32_t cfg_blocks = CONFIG_MAGNOLIA_LITTLEFS_BLOCK_COUNT;
+    uint32_t block_count = max_blocks;
+    if (cfg_blocks > 0 && cfg_blocks < max_blocks) {
+        block_count = cfg_blocks;
+    } else if (cfg_blocks > max_blocks) {
+        ESP_LOGW("littlefs", "block_count %u exceeds partition, clamping to %u",
+                 (unsigned)cfg_blocks, (unsigned)max_blocks);
+        block_count = max_blocks;
+    }
+
+    ctx->partition = part;
+    ctx->base = 0;
+    ctx->size = part->size;
+    ctx->block_size = block_size;
+    ctx->read_only = (mount_opts != NULL && mount_opts->read_only);
+    data->flash = ctx;
+
+    ESP_LOGI("littlefs", "mount label=%s offset=0x%08"PRIx32" size=%"PRIu32" block=%"PRIu32" blocks=%"PRIu32" ro=%d",
+             label, part->address, part->size, block_size, block_count, ctx->read_only);
+
+    data->cfg.context = ctx;
     data->cfg.read = littlefs_backend_read;
     data->cfg.prog = littlefs_backend_prog;
     data->cfg.erase = littlefs_backend_erase;
     data->cfg.sync = littlefs_backend_sync;
     data->cfg.read_size = CONFIG_MAGNOLIA_LITTLEFS_READ_SIZE;
     data->cfg.prog_size = CONFIG_MAGNOLIA_LITTLEFS_PROG_SIZE;
-    data->cfg.block_size = CONFIG_MAGNOLIA_LITTLEFS_BLOCK_SIZE;
-    data->cfg.block_count = CONFIG_MAGNOLIA_LITTLEFS_BLOCK_COUNT;
+    data->cfg.block_size = block_size;
+    data->cfg.block_count = block_count;
     data->cfg.block_cycles = CONFIG_MAGNOLIA_LITTLEFS_BLOCK_CYCLES;
     data->cfg.cache_size = CONFIG_MAGNOLIA_LITTLEFS_CACHE_SIZE;
     data->cfg.lookahead_size = CONFIG_MAGNOLIA_LITTLEFS_LOOKAHEAD_SIZE;
@@ -249,8 +375,13 @@ littlefs_mount(m_vfs_mount_t *mount,
     data->cfg.prog_buffer = NULL;
     data->cfg.lookahead_buffer = NULL;
 
+    bool force_format = (mount_opts != NULL && mount_opts->force_format);
+    bool format_if_fail = (mount_opts != NULL && (mount_opts->format_if_empty ||
+                                                 mount_opts->format_if_mount_fails))
+            || CONFIG_MAGNOLIA_LITTLEFS_FORMAT_IF_FAIL;
+
     int err = LFS_ERR_OK;
-    if (mount_opts != NULL && mount_opts->force_format) {
+    if (force_format && !ctx->read_only) {
         err = lfs_format(&data->lfs, &data->cfg);
         if (err < 0) {
             err = littlefs_error_translate(err);
@@ -259,11 +390,13 @@ littlefs_mount(m_vfs_mount_t *mount,
 
     err = lfs_mount(&data->lfs, &data->cfg);
     if (err < 0) {
-        if (mount_opts != NULL && mount_opts->format_if_empty) {
+        if (format_if_fail && !ctx->read_only) {
             lfs_format(&data->lfs, &data->cfg);
             err = lfs_mount(&data->lfs, &data->cfg);
         }
         if (err < 0) {
+            vPortFree(ctx);
+            vSemaphoreDelete(data->lock);
             vPortFree(data);
             return littlefs_error_translate(err);
         }
@@ -299,6 +432,12 @@ littlefs_unmount(m_vfs_mount_t *mount)
     }
 
     lfs_unmount(&data->lfs);
+    if (data->flash != NULL) {
+        vPortFree(data->flash);
+    }
+    if (data->lock != NULL) {
+        vSemaphoreDelete(data->lock);
+    }
     vPortFree(data);
     mount->fs_private = NULL;
 
@@ -350,7 +489,9 @@ littlefs_create(m_vfs_mount_t *mount,
         return M_VFS_ERR_INVALID_PARAM;
     }
 
-    portENTER_CRITICAL(&data->lock);
+    if (!littlefs_lock_take(data)) {
+        return M_VFS_ERR_TIMEOUT;
+    }
     lfs_file_t file;
     int err = lfs_file_open(&data->lfs,
                             &file,
@@ -359,7 +500,7 @@ littlefs_create(m_vfs_mount_t *mount,
     if (err >= 0) {
         lfs_file_close(&data->lfs, &file);
     }
-    portEXIT_CRITICAL(&data->lock);
+    littlefs_lock_give(data);
 
     if (err < 0) {
         return littlefs_error_translate(err);
@@ -398,9 +539,11 @@ littlefs_mkdir(m_vfs_mount_t *mount,
         return M_VFS_ERR_INVALID_PARAM;
     }
 
-    portENTER_CRITICAL(&data->lock);
+    if (!littlefs_lock_take(data)) {
+        return M_VFS_ERR_TIMEOUT;
+    }
     int err = lfs_mkdir(&data->lfs, littlefs_path_for_lfs(child_path));
-    portEXIT_CRITICAL(&data->lock);
+    littlefs_lock_give(data);
     if (err < 0) {
         return littlefs_error_translate(err);
     }
@@ -436,9 +579,11 @@ littlefs_unlink(m_vfs_mount_t *mount,
         return M_VFS_ERR_INVALID_PARAM;
     }
 
-    portENTER_CRITICAL(&data->lock);
+    if (!littlefs_lock_take(data)) {
+        return M_VFS_ERR_TIMEOUT;
+    }
     int err = lfs_remove(&data->lfs, littlefs_path_for_lfs(child_path));
-    portEXIT_CRITICAL(&data->lock);
+    littlefs_lock_give(data);
     return littlefs_error_translate(err);
 }
 
@@ -452,7 +597,7 @@ littlefs_open(m_vfs_node_t *node,
     }
 
     littlefs_node_data_t *node_data = node->fs_private;
-    if (node_data == NULL || node_data->is_dir) {
+    if (node_data == NULL) {
         return M_VFS_ERR_INVALID_PARAM;
     }
 
@@ -466,6 +611,22 @@ littlefs_open(m_vfs_node_t *node,
         return M_VFS_ERR_NO_MEMORY;
     }
     file_data->mount = data;
+    file_data->is_dir = node_data->is_dir;
+
+    if (node_data->is_dir) {
+        if ((flags & (O_WRONLY | O_RDWR)) != 0) {
+            vPortFree(file_data);
+            return M_VFS_ERR_INVALID_PARAM;
+        }
+        m_vfs_file_t *file = m_vfs_file_create(node);
+        if (file == NULL) {
+            vPortFree(file_data);
+            return M_VFS_ERR_NO_MEMORY;
+        }
+        file->fs_private = file_data;
+        *out_file = file;
+        return M_VFS_ERR_OK;
+    }
 
     int lfs_flags = LFS_O_RDONLY;
     if ((flags & O_RDWR) == O_RDWR) {
@@ -483,12 +644,15 @@ littlefs_open(m_vfs_node_t *node,
         lfs_flags |= LFS_O_APPEND;
     }
 
-    portENTER_CRITICAL(&data->lock);
+    if (!littlefs_lock_take(data)) {
+        vPortFree(file_data);
+        return M_VFS_ERR_TIMEOUT;
+    }
     int err = lfs_file_open(&data->lfs,
-                            &file_data->file,
-                            littlefs_path_for_lfs(node_data->path),
-                            lfs_flags);
-    portEXIT_CRITICAL(&data->lock);
+                             &file_data->file,
+                             littlefs_path_for_lfs(node_data->path),
+                             lfs_flags);
+    littlefs_lock_give(data);
 
     if (err < 0) {
         vPortFree(file_data);
@@ -497,9 +661,10 @@ littlefs_open(m_vfs_node_t *node,
 
     m_vfs_file_t *file = m_vfs_file_create(node);
     if (file == NULL) {
-        portENTER_CRITICAL(&data->lock);
-        lfs_file_close(&data->lfs, &file_data->file);
-        portEXIT_CRITICAL(&data->lock);
+        if (littlefs_lock_take(data)) {
+            lfs_file_close(&data->lfs, &file_data->file);
+            littlefs_lock_give(data);
+        }
         vPortFree(file_data);
         return M_VFS_ERR_NO_MEMORY;
     }
@@ -529,13 +694,18 @@ littlefs_read(m_vfs_file_t *file,
     if (data == NULL || data->mount == NULL) {
         return M_VFS_ERR_INVALID_PARAM;
     }
+    if (data->is_dir) {
+        return M_VFS_ERR_INVALID_PARAM;
+    }
 
-    portENTER_CRITICAL(&data->mount->lock);
+    if (!littlefs_lock_take(data->mount)) {
+        return M_VFS_ERR_TIMEOUT;
+    }
     lfs_ssize_t result = lfs_file_read(&data->mount->lfs,
                                        &data->file,
                                        buffer,
                                        size);
-    portEXIT_CRITICAL(&data->mount->lock);
+    littlefs_lock_give(data->mount);
 
     if (result < 0) {
         return littlefs_error_translate((int)result);
@@ -559,8 +729,13 @@ littlefs_write(m_vfs_file_t *file,
     if (data == NULL || data->mount == NULL) {
         return M_VFS_ERR_INVALID_PARAM;
     }
+    if (data->is_dir) {
+        return M_VFS_ERR_INVALID_PARAM;
+    }
 
-    portENTER_CRITICAL(&data->mount->lock);
+    if (!littlefs_lock_take(data->mount)) {
+        return M_VFS_ERR_TIMEOUT;
+    }
     lfs_ssize_t result = lfs_file_write(&data->mount->lfs,
                                         &data->file,
                                         buffer,
@@ -568,7 +743,7 @@ littlefs_write(m_vfs_file_t *file,
     if (result >= 0) {
         lfs_file_sync(&data->mount->lfs, &data->file);
     }
-    portEXIT_CRITICAL(&data->mount->lock);
+    littlefs_lock_give(data->mount);
 
     if (result < 0) {
         return littlefs_error_translate((int)result);
@@ -599,12 +774,14 @@ littlefs_readdir(m_vfs_file_t *dir,
     }
 
     lfs_dir_t ldir;
-    portENTER_CRITICAL(&data->lock);
+    if (!littlefs_lock_take(data)) {
+        return M_VFS_ERR_TIMEOUT;
+    }
     int err = lfs_dir_open(&data->lfs,
                            &ldir,
                            littlefs_path_for_lfs(node_data->path));
     if (err < 0) {
-        portEXIT_CRITICAL(&data->lock);
+        littlefs_lock_give(data);
         return littlefs_error_translate(err);
     }
 
@@ -626,7 +803,7 @@ littlefs_readdir(m_vfs_file_t *dir,
         ++count;
     }
     lfs_dir_close(&data->lfs, &ldir);
-    portEXIT_CRITICAL(&data->lock);
+    littlefs_lock_give(data);
 
     *populated = count;
     return M_VFS_ERR_OK;
@@ -651,11 +828,13 @@ littlefs_getattr(m_vfs_node_t *node,
     }
 
     struct lfs_info info;
-    portENTER_CRITICAL(&data->lock);
+    if (!littlefs_lock_take(data)) {
+        return M_VFS_ERR_TIMEOUT;
+    }
     int err = lfs_stat(&data->lfs,
                        littlefs_path_for_lfs(node_data->path),
                        &info);
-    portEXIT_CRITICAL(&data->lock);
+    littlefs_lock_give(data);
 
     if (err < 0) {
         return littlefs_error_translate(err);
@@ -697,20 +876,22 @@ littlefs_setattr(m_vfs_node_t *node,
         return M_VFS_ERR_INVALID_PARAM;
     }
 
-    portENTER_CRITICAL(&data->lock);
+    if (!littlefs_lock_take(data)) {
+        return M_VFS_ERR_TIMEOUT;
+    }
     lfs_file_t file;
     int err = lfs_file_open(&data->lfs,
                             &file,
                             littlefs_path_for_lfs(node_data->path),
                             LFS_O_RDWR);
     if (err < 0) {
-        portEXIT_CRITICAL(&data->lock);
+        littlefs_lock_give(data);
         return littlefs_error_translate(err);
     }
 
     err = lfs_file_truncate(&data->lfs, &file, stat->size);
     lfs_file_close(&data->lfs, &file);
-    portEXIT_CRITICAL(&data->lock);
+    littlefs_lock_give(data);
 
     return littlefs_error_translate(err);
 }

@@ -1,0 +1,22 @@
+menu "Magnolia ELF Loader"
+    config MAGNOLIA_ELF_ENABLED
+        bool "Enable kernel ELF loader"
+        default y
+        help
+            Baseline autonomous ELF32 loader integrated with Magnolia jobs.
+
+    config MAGNOLIA_ELF_SELFTESTS
+        bool "Run ELF loader selftests at boot"
+        depends on MAGNOLIA_ELF_ENABLED
+        default n
+        help
+            Runs basic parsing/relocation tests and optional embedded ELF run.
+
+    config MAGNOLIA_ELF_APPLETS_SELFTESTS
+        bool "Run ELF applets from LittleFS at boot"
+        depends on MAGNOLIA_ELF_ENABLED && MAGNOLIA_LITTLEFS_ENABLED
+        default n
+        help
+            After mounting LittleFS at /flash, attempts to run /flash/elftest
+            and treats rc=0 as PASS.
+endmenu

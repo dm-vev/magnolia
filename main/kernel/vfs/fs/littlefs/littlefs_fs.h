@@ -8,6 +8,11 @@ extern "C" {
 #endif
 
 typedef struct {
+    const char *partition_label;
+    bool format_if_mount_fails;
+    bool read_only;
+
+    /* Legacy aliases */
     bool format_if_empty;
     bool force_format;
 } littlefs_mount_options_t;

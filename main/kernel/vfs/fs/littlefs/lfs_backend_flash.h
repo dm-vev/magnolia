@@ -1,11 +1,23 @@
 #ifndef MAGNOLIA_VFS_LITTLEFS_BACKEND_H
 #define MAGNOLIA_VFS_LITTLEFS_BACKEND_H
 
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "esp_partition.h"
 #include "lfs.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef struct {
+    const esp_partition_t *partition;
+    uint32_t base;
+    uint32_t size;
+    uint32_t block_size;
+    bool read_only;
+} littlefs_flash_ctx_t;
 
 int littlefs_backend_read(const struct lfs_config *c,
                           lfs_block_t block,
