@@ -126,8 +126,31 @@ m_job_error_t m_job_handle_destroy(m_job_id_t job)
     }
     job->destroyed = true;
     portEXIT_CRITICAL(&job->lock);
+
+    /*
+     * Run destruction callbacks inside the job context so that job-scoped
+     * allocators and VFS cleanup observe the correct current job.
+     */
+    job_ctx_t *ctx = job->ctx;
+    job_ctx_t *prev = jctx_current();
+    if (ctx != NULL) {
+        jctx_acquire(ctx);
+        jctx_set_current(ctx);
+    }
+
     _m_job_notify_destroyed(job);
+
+    if (ctx != NULL) {
+        jctx_set_current(prev);
+        jctx_release(ctx);
+    } else {
+        jctx_set_current(prev);
+    }
+
     if (job->ctx != NULL) {
+        if (jctx_current() == job->ctx) {
+            jctx_set_current(NULL);
+        }
         jctx_release(job->ctx);
         job->ctx = NULL;
     }

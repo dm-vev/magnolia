@@ -25,10 +25,12 @@ int m_elf_arch_relocate(struct m_elf *elf, const elf32_rela_t *rela,
 
     assert(elf && rela);
 
-    m_elf_t *e = (m_elf_t *)elf;
-    where = (uint32_t *)((uint8_t *)e->psegment + rela->offset + e->svaddr);
-    ESP_LOGD(TAG, "type=%d where=%p base=%p off=0x%x",
-             ELF_R_TYPE(rela->info), where, e->psegment, (int)rela->offset);
+    where = (uint32_t *)m_elf_map_vaddr((m_elf_t *)elf, rela->offset);
+    ESP_LOGD(TAG, "type=%d where=%p addr=0x%x off=0x%x",
+             ELF_R_TYPE(rela->info), where, (int)addr, (int)rela->offset);
+    if (where == NULL) {
+        return -EINVAL;
+    }
 
     switch (ELF_R_TYPE(rela->info)) {
     case R_RISCV_NONE:
@@ -37,7 +39,7 @@ int m_elf_arch_relocate(struct m_elf *elf, const elf32_rela_t *rela,
         *where = addr + rela->addend;
         break;
     case R_RISCV_RELATIVE:
-        *where = (Elf32_Addr)((uint8_t *)e->psegment - e->svaddr + rela->addend);
+        *where = (Elf32_Addr)(((m_elf_t *)elf)->load_bias + (uintptr_t)(intptr_t)rela->addend);
         break;
     case R_RISCV_JUMP_SLOT:
         *where = addr;
@@ -49,4 +51,3 @@ int m_elf_arch_relocate(struct m_elf *elf, const elf32_rela_t *rela,
 
     return 0;
 }
-

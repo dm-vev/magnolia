@@ -299,6 +299,12 @@ _m_vfs_mount_matches_path(const m_vfs_mount_t *mount,
         return false;
     }
 
+    /* Root mount must match any absolute path. */
+    if (mount->target_len == 1 && mount->target[0] == '/' &&
+            path->normalized[0] == '/') {
+        return true;
+    }
+
     if (strncmp(path->normalized, mount->target, mount->target_len) != 0) {
         return false;
     }

@@ -1,0 +1,7 @@
+# List of applet directories to build as ELF targets.
+# New directories can be added here without touching the build script.
+build_elf_file_example
+elftest
+zighello
+rshello
+gohello

@@ -12,11 +12,53 @@ menu "Magnolia ELF Loader"
         help
             Runs basic parsing/relocation tests and optional embedded ELF run.
 
+    config MAGNOLIA_ELF_EXPORT_NEWLIB
+        bool "Export extended newlib ABI symbols"
+        depends on MAGNOLIA_ELF_ENABLED
+        default y
+        help
+            Exports a larger symbol set (FILE* stdio, newlib _*_r syscalls, scanf family)
+            to maximize compatibility with applets built against newlib.
+
     config MAGNOLIA_ELF_APPLETS_SELFTESTS
         bool "Run ELF applets from LittleFS at boot"
         depends on MAGNOLIA_ELF_ENABLED && MAGNOLIA_LITTLEFS_ENABLED
         default n
         help
-            After mounting LittleFS at /flash, attempts to run /flash/elftest
-            and treats rc=0 as PASS.
+            Attempts to run a user ELF applet from the VFS and treats rc=0 as PASS.
+            The default path is configured by MAGNOLIA_ELF_SELFTEST_APPLET_PATH.
+
+    config MAGNOLIA_ELF_SELFTEST_APPLET_PATH
+        string "ELF selftest applet path"
+        depends on MAGNOLIA_ELF_APPLETS_SELFTESTS
+        default "/bin/elftest"
+        help
+            Filesystem path to the ELF applet executed as part of the boot selftests
+            when MAGNOLIA_ELF_APPLETS_SELFTESTS is enabled.
+
+    config MAGNOLIA_ELF_AUTOSTART_INIT
+        bool "Autostart /bin/init after boot"
+        depends on MAGNOLIA_ELF_ENABLED && MAGNOLIA_LITTLEFS_ENABLED && MAGNOLIA_JOB_ENABLED
+        default y
+        help
+            Starts the userland init applet in a dedicated job worker after the kernel
+            finishes boot and optional selftests.
+
+    config MAGNOLIA_ELF_INIT_PATH
+        string "Init applet path"
+        depends on MAGNOLIA_ELF_AUTOSTART_INIT
+        default "/bin/init"
+        help
+            Filesystem path of the init applet started when MAGNOLIA_ELF_AUTOSTART_INIT
+            is enabled.
+
+    config MAGNOLIA_ELF_INIT_STACK_DEPTH
+        int "Init task stack depth"
+        depends on MAGNOLIA_ELF_AUTOSTART_INIT
+        range 4096 65536
+        default 16384
+        help
+            Stack reservation for the FreeRTOS task that runs the init job worker,
+            specified in BYTES. Increase this if `/bin/init` or applets like `ls`
+            trigger FreeRTOS stack overflow detection.
 endmenu

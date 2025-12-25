@@ -46,7 +46,7 @@ void m_arch_start(void)
     xTaskCreatePinnedToCore(
         m_kernel_task_entry,  // entrypoint Magnolia
         "magnolia_root",
-        4096,
+        16384,
         NULL,
         10, // приоритет
         NULL,

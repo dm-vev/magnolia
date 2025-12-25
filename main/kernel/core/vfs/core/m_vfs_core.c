@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
+#include <fcntl.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
@@ -679,7 +680,41 @@ m_vfs_open(m_job_id_t job,
     m_vfs_node_t *node = NULL;
     err = m_vfs_path_resolve(job, &parsed, &node);
     if (err != M_VFS_ERR_OK) {
-        return _m_vfs_record_result(err);
+        if (err == M_VFS_ERR_NOT_FOUND && (flags & O_CREAT)) {
+            m_vfs_node_t *parent = NULL;
+            char leaf[M_VFS_NAME_MAX_LEN] = {0};
+            m_vfs_error_t parent_err =
+                    _m_vfs_resolve_parent(job, &parsed, &parent, leaf, sizeof(leaf));
+            if (parent_err != M_VFS_ERR_OK) {
+                return _m_vfs_record_result(parent_err);
+            }
+
+            if (parent == NULL || parent->fs_type == NULL || parent->fs_type->ops == NULL ||
+                    parent->fs_type->ops->create == NULL) {
+                if (parent != NULL) {
+                    m_vfs_node_release(parent);
+                }
+                return _m_vfs_record_result(M_VFS_ERR_NOT_SUPPORTED);
+            }
+
+            m_vfs_error_t create_err =
+                    parent->fs_type->ops->create(parent->mount,
+                                                 parent,
+                                                 leaf,
+                                                 M_VFS_FILE_MODE_DEFAULT,
+                                                 &node);
+            m_vfs_node_release(parent);
+            if (create_err != M_VFS_ERR_OK) {
+                return _m_vfs_record_result(create_err);
+            }
+        } else {
+            return _m_vfs_record_result(err);
+        }
+    } else {
+        if ((flags & O_CREAT) && (flags & O_EXCL)) {
+            m_vfs_node_release(node);
+            return _m_vfs_record_result(M_VFS_ERR_BUSY);
+        }
     }
 
     if (node == NULL || node->fs_type == NULL || node->fs_type->ops == NULL ||
@@ -700,14 +735,36 @@ m_vfs_open(m_job_id_t job,
         return _m_vfs_record_result(err);
     }
 
+    if ((flags & O_TRUNC) && file->node != NULL && file->node->fs_type != NULL &&
+            file->node->fs_type->ops != NULL &&
+            file->node->fs_type->ops->setattr != NULL) {
+        m_vfs_stat_t st = {0};
+        st.size = 0;
+        (void)file->node->fs_type->ops->setattr(file->node, &st);
+    }
+
+    if ((flags & O_APPEND) && file->node != NULL && file->node->fs_type != NULL &&
+            file->node->fs_type->ops != NULL &&
+            file->node->fs_type->ops->getattr != NULL) {
+        m_vfs_stat_t st = {0};
+        if (file->node->fs_type->ops->getattr(file->node, &st) == M_VFS_ERR_OK) {
+            m_vfs_file_set_offset(file, st.size);
+        }
+    }
+
     int fd = m_vfs_fd_allocate(job, file);
     if (fd < 0) {
-        if (node->fs_type->ops->close != NULL) {
-            node->fs_type->ops->close(file);
+        if (file->node != NULL && file->node->fs_type != NULL &&
+                file->node->fs_type->ops != NULL &&
+                file->node->fs_type->ops->close != NULL) {
+            file->node->fs_type->ops->close(file);
         }
         m_vfs_file_release(file);
         return _m_vfs_record_result(M_VFS_ERR_TOO_MANY_ENTRIES);
     }
+
+    /* Balance the open-time reference; the fd table now owns a reference. */
+    m_vfs_file_release(file);
 
     *out_fd = fd;
     return _m_vfs_record_result(M_VFS_ERR_OK);

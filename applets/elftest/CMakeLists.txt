@@ -3,4 +3,6 @@ cmake_minimum_required(VERSION 3.5)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(elftest)
 
-idf_component_register(SRCS "main.c")
+# Use the ELF loader helper to produce an ELF application artifact.
+include(elf_loader)
+project_elf(elftest)

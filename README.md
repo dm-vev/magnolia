@@ -1,29 +1,62 @@
-# MagnoliaOS (ESP32-S3)
+# Magnolia (ESP32-S3)
 
-- Монолитное приложение ESP-IDF, построенное вокруг unix-каркаса xv6 (в `main/kernel/esp32/`) с минимальным количеством низкоуровневого кода:
-- файловая система xv6 заменена на ESP-IDF VFS (FAT на SPI flash);
-- планировщик — FreeRTOS, задачи ядра поднимаются как FreeRTOS tasks;
-- загрузчик ELF убран: собирается один образ, внешний загрузчик можно интегрировать позже.
-- файловая система xv6 заменена на ESP-IDF VFS (FAT на SPI flash);
-- планировщик — FreeRTOS, задачи ядра поднимаются как FreeRTOS tasks;
-- загрузчик ELF убран: собирается один образ, внешний загрузчик можно интегрировать позже.
+Magnolia is a small Unix-like environment for ESP32-S3: a FreeRTOS-based kernel, a LittleFS-backed VFS, and user programs shipped as ELF applets in `/bin`.
 
-## Как собрать и запустить
+## ACKNOWLEDGMENTS
+
+Magnolia is inspired by xv6 (a Unix V6-style teaching kernel) and uses ESP-IDF components, including FreeRTOS and the ESP-IDF VFS layer.
+
+## ERROR REPORTS
+
+This repository is not a product: interfaces and ABI may change without backwards compatibility guarantees.
+
+## BUILDING AND RUNNING
+
+### Flashing (hardware)
 
 ```bash
+source esp-idf/export.sh
 idf.py set-target esp32s3
 idf.py build
 idf.py -p <PORT> flash monitor
 ```
 
-## Что внутри
+### Build and flash VFS (/flash) + ELF applets
 
-- `main/kernel/esp32/` — unix-каркас: FreeRTOS-задачи, монтирование ESP-IDF VFS и лог (без ассемблера и без trap/VM/PLIC);
-- `main/kernel/esp32/xv6_shim.c` — демонстрационный init-процесс: пишет boot log в `MAGNOLIA_FS_BASE_PATH/boot.log` через POSIX-вызовы;
-- `main/main.c` — точка входа ESP-IDF, вызывает `kernel_boot()`.
-## Настройка
+```bash
+make applets
+make flash-vfs PORT=/dev/ttyUSB0
+```
+
+### QEMU (if configured)
+
+```bash
+make qemu
+```
+
+## WHAT'S INSIDE
+
+- `main/kernel/` — kernel (VFS, ELF loader, job allocator, core services).
+- `applets/sh/` — small shell that runs ELF from `/bin` (supports `>` and `>>` for stdout).
+- `rootfs/` — filesystem tree packed into a LittleFS image (see `tools/applets.py`).
+- `tools/applets.py` — builds ELF applets and packs `rootfs/` into `build/vfs.bin`.
+
+## QUICK DEMO (inside Magnolia)
+
+```sh
+ls /bin
+ls /flash
+cat /flash/README.txt
+echo Hello > /flash/test.txt
+echo world >> /flash/test.txt
+cat /flash/test.txt
+zighello
+rshello
+gohello
+```
+
+## CONFIGURATION
 
 `idf.py menuconfig` → `MagnoliaOS Configuration`:
-- `MAGNOLIA_FS_BASE_PATH` — точка монтирования VFS (по умолчанию `/fs`);
-- `MAGNOLIA_FS_PARTITION_LABEL` — метка раздела в таблице разделов (по умолчанию `storage`);
-- лимиты стека и приоритеты задач `xv6-init` и heartbeat.
+- LittleFS/VFS settings (`/flash` mount and sizes);
+- task/memory limits and debug options.

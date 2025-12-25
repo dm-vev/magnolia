@@ -12,6 +12,22 @@
 #include "kernel/core/vfs/core/m_vfs_wait.h"
 #include "kernel/core/vfs/fd/m_vfs_fd.h"
 
+#ifndef CONFIG_MAGNOLIA_VFS_MAX_OPEN_FILES_PER_JOB
+#define CONFIG_MAGNOLIA_VFS_MAX_OPEN_FILES_PER_JOB 16
+#endif
+
+#ifndef CONFIG_MAGNOLIA_VFS_MAX_OPEN_FILES_GLOBAL
+#define CONFIG_MAGNOLIA_VFS_MAX_OPEN_FILES_GLOBAL 16
+#endif
+
+#if CONFIG_MAGNOLIA_VFS_MAX_OPEN_FILES_PER_JOB < 4
+#error "CONFIG_MAGNOLIA_VFS_MAX_OPEN_FILES_PER_JOB must be >= 4 (fd 0/1/2 reserved)"
+#endif
+
+#if CONFIG_MAGNOLIA_VFS_MAX_OPEN_FILES_GLOBAL < 4
+#error "CONFIG_MAGNOLIA_VFS_MAX_OPEN_FILES_GLOBAL must be >= 4 (fd 0/1/2 reserved)"
+#endif
+
 #if CONFIG_MAGNOLIA_VFS_FD_LOGGING
 #include "esp_log.h"
 #define TAG "vfs/fd"
@@ -212,7 +228,12 @@ int m_vfs_fd_allocate(m_job_id_t job, m_vfs_file_t *file)
 
     portENTER_CRITICAL(lock);
     int slot = -1;
-    for (size_t i = 0; i < capacity; ++i) {
+    /*
+     * Reserve POSIX stdio descriptors (0/1/2). libc treats them as stdin/out/err,
+     * so VFS-backed files must start at fd=3 to avoid collisions.
+     */
+    size_t start = (capacity > 3) ? 3u : capacity;
+    for (size_t i = start; i < capacity; ++i) {
         if (!entries[i].in_use) {
             entries[i].in_use = true;
             entries[i].file = file;

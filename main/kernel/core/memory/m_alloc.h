@@ -5,6 +5,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 #include "kernel/core/job/jctx.h"
 
@@ -36,11 +37,6 @@ typedef struct {
  * @brief Initialize Magnolia allocator subsystems (system job context, stats, etc.).
  */
 void m_alloc_init(void);
-
-void *malloc(size_t size);
-void *calloc(size_t nmemb, size_t size);
-void *realloc(void *ptr, size_t new_size);
-void free(void *ptr);
 
 void *m_job_alloc(job_ctx_t *ctx, size_t size);
 void *m_job_calloc(job_ctx_t *ctx, size_t nmemb, size_t size);

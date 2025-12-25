@@ -58,13 +58,14 @@ config MAGNOLIA_JOB_QUEUE_WORKER_COUNT_MAX
 
 config MAGNOLIA_JOB_WORKER_STACK_DEPTH
 	int "Job worker stack depth"
-	range 512 16384
-	default CONFIG_FREERTOS_MINIMAL_STACK_SIZE
+	range 1024 65536
+	default 8192
 	depends on MAGNOLIA_JOB_ENABLED
 	help
-		Stack reservation used when spawning worker threads. Lower values save memory
-		but require tighter stack analysis; set this to at least
-		CONFIG_FREERTOS_MINIMAL_STACK_SIZE when possible.
+		Stack reservation used when spawning worker threads, specified in BYTES
+		(ESP-IDF FreeRTOS uses bytes for xTaskCreate()). Lower values save memory
+		but require tighter stack analysis; values below ~8KB are likely to
+		overflow once userland ELF applets run libc-heavy code.
 
 config MAGNOLIA_JOB_WORKER_PRIORITY
 	int "Job worker priority"

@@ -50,22 +50,24 @@ config MAGNOLIA_VFS_MOUNT_OVERLAYS
 
 config MAGNOLIA_VFS_MAX_OPEN_FILES_PER_JOB
     int "Max open files per job"
-    range 1 64
+    range 4 64
     default 16
     depends on MAGNOLIA_VFS_ENABLED
     help
         Limits the number of FDs a Magnolia job may open at once. Sets the size
         of the job-local FD table and bounds per-job memory usage.
+        Note: file descriptors 0/1/2 are reserved for stdin/stdout/stderr.
 
 config MAGNOLIA_VFS_MAX_OPEN_FILES_GLOBAL
     int "Kernel-global FD capacity"
-    range 1 64
+    range 4 64
     default 16
     depends on MAGNOLIA_VFS_ENABLED
     help
         Maximum number of global FDs that kernel contexts may take (job is
         NULL). This guards the kernel FD table used for drivers that operate
         outside of job contexts.
+        Note: file descriptors 0/1/2 are reserved for stdin/stdout/stderr.
 
 config MAGNOLIA_VFS_FD_LOGGING
     bool "Enable VFS FD table logging"
@@ -209,7 +211,7 @@ config MAGNOLIA_LITTLEFS_FORMAT_IF_FAIL
 config MAGNOLIA_LITTLEFS_BLOCK_SIZE
     int "Logical block size"
     range 256 4096
-    default 512
+    default 4096
     depends on MAGNOLIA_LITTLEFS_ENABLED
     help
         Size of a logical block that LittleFS will manage. Must divide the
@@ -219,7 +221,7 @@ config MAGNOLIA_LITTLEFS_BLOCK_SIZE
 config MAGNOLIA_LITTLEFS_BLOCK_COUNT
     int "Block count"
     range 8 2048
-    default 256
+    default 128
     depends on MAGNOLIA_LITTLEFS_ENABLED
     help
         Total number of erasable blocks exposed to LittleFS. Combined with the
@@ -283,6 +285,14 @@ config MAGNOLIA_VFS_LITTLEFS_SELFTESTS
     help
         Build the LittleFS self-tests that exercise mounting, formatting, and
         IO operations through the Magnolia VFS layer.
+
+config MAGNOLIA_LITTLEFS_SELFTEST_TASK_STACK_DEPTH
+    int "LittleFS selftests task stack depth"
+    default 4096
+    depends on MAGNOLIA_VFS_LITTLEFS_SELFTESTS
+    help
+        Stack depth (in FreeRTOS words, like xTaskCreate) used to run the LittleFS
+        selftests in a dedicated task to avoid overflowing the main task stack.
 
 config MAGNOLIA_LITTLEFS_TEST_LOG_IO
     bool "Log LittleFS flash IO during selftests"

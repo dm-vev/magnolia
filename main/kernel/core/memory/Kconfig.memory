@@ -53,4 +53,14 @@ config MAGNOLIA_ALLOC_SELFTESTS
         CI and diagnostics; disable in production unless the extra validation
         coverage is required.
 
+config MAGNOLIA_ALLOC_WRAP_LIBC
+    bool "Wrap libc malloc/free"
+    default y
+    depends on MAGNOLIA_ALLOC_ENABLED
+    help
+        Redirect libc/newlib malloc/calloc/realloc/free (+ _*_r variants) to
+        Magnolia's job-aware allocator using the linker --wrap mechanism. This
+        keeps the kernel and selftests using the Magnolia allocator without
+        conflicting with ESP-IDF's own newlib implementations.
+
 endmenu

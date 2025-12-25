@@ -102,11 +102,10 @@ if(CONFIG_MAGNOLIA_VFS_ENABLED)
     if(CONFIG_MAGNOLIA_VFS_SELFTESTS)
         list(APPEND APP_SRCS "kernel/core/vfs/core/m_vfs_selftests.c")
     endif()
-    if(CONFIG_MAGNOLIA_RAMFS_ENABLED)
-        list(APPEND APP_SRCS
-            "kernel/core/vfs/ramfs/ramfs.c"
-        )
-    endif()
+    # Always compile ramfs to provide stubs when disabled.
+    list(APPEND APP_SRCS
+        "kernel/core/vfs/ramfs/ramfs.c"
+    )
     if(CONFIG_MAGNOLIA_VFS_DEVFS)
         list(APPEND APP_SRCS
             "kernel/vfs/fs/devfs/devfs.c"
@@ -181,6 +180,7 @@ if(CONFIG_MAGNOLIA_ELF_ENABLED)
         "kernel/core/elf/m_elf_loader.c"
         "kernel/core/elf/m_elf_platform.c"
         "kernel/core/elf/m_elf_symbol.c"
+        "kernel/core/libc/m_libc_compat.c"
     )
 
     if(CONFIG_IDF_TARGET_ARCH_XTENSA)
@@ -213,9 +213,96 @@ idf_component_register(
         "kernel/core/job"
         "kernel/core/ipc"
         "kernel/core/memory"
+        "kernel/core/libc"
         "kernel/core/elf"
         "kernel/core/vfs"
         "kernel/vfs"
         "lib"
         "lib/libexec"
+    PRIV_REQUIRES
+        newlib
+        esp_timer
+        esp_partition
 )
+
+if(CONFIG_MAGNOLIA_ALLOC_ENABLED AND CONFIG_MAGNOLIA_ALLOC_WRAP_LIBC)
+    target_link_options(${COMPONENT_LIB} INTERFACE
+        "-Wl,--wrap=malloc"
+        "-Wl,--wrap=calloc"
+        "-Wl,--wrap=realloc"
+        "-Wl,--wrap=free"
+        "-Wl,--wrap=_malloc_r"
+        "-Wl,--wrap=_calloc_r"
+        "-Wl,--wrap=_realloc_r"
+        "-Wl,--wrap=_free_r"
+    )
+endif()
+
+# Generate a LittleFS partition image from the repo rootfs/ directory and add
+# it to the project's flash (and QEMU) image.
+if(CONFIG_MAGNOLIA_VFS_ENABLED AND CONFIG_MAGNOLIA_LITTLEFS_ENABLED)
+    set(MAGNOLIA_ROOTFS_DIR "${CMAKE_CURRENT_LIST_DIR}/../rootfs")
+    if(EXISTS "${MAGNOLIA_ROOTFS_DIR}")
+        set(MAGNOLIA_LFS_PARTITION "${CONFIG_MAGNOLIA_LITTLEFS_PARTITION_LABEL}")
+        string(REPLACE "\"" "" MAGNOLIA_LFS_PARTITION "${MAGNOLIA_LFS_PARTITION}")
+
+        partition_table_get_partition_info(MAGNOLIA_LFS_SIZE
+                                           "--partition-name ${MAGNOLIA_LFS_PARTITION}"
+                                           "size")
+        if(MAGNOLIA_LFS_SIZE)
+            set(MAGNOLIA_LFS_IMAGE "${CMAKE_BINARY_DIR}/${MAGNOLIA_LFS_PARTITION}.bin")
+            set(MAGNOLIA_MKLFS_TOOL "${CMAKE_BINARY_DIR}/magnolia_mklfs${CMAKE_EXECUTABLE_SUFFIX}")
+
+            find_program(MAGNOLIA_HOST_CC NAMES gcc cc)
+            if(NOT MAGNOLIA_HOST_CC)
+                message(FATAL_ERROR "Host C compiler (gcc/cc) not found; required to build LittleFS image generator.")
+            endif()
+
+            add_custom_command(
+                OUTPUT ${MAGNOLIA_MKLFS_TOOL}
+                COMMAND ${MAGNOLIA_HOST_CC} -O2 -std=c99 -Wall -Wextra
+                        -I${CMAKE_CURRENT_LIST_DIR}/kernel/vfs/fs/littlefs
+                        -o ${MAGNOLIA_MKLFS_TOOL}
+                        ${CMAKE_CURRENT_LIST_DIR}/../tools/magnolia_mklfs.c
+                        ${CMAKE_CURRENT_LIST_DIR}/kernel/vfs/fs/littlefs/lfs.c
+                        ${CMAKE_CURRENT_LIST_DIR}/kernel/vfs/fs/littlefs/lfs_util.c
+                DEPENDS
+                    ${CMAKE_CURRENT_LIST_DIR}/../tools/magnolia_mklfs.c
+                    ${CMAKE_CURRENT_LIST_DIR}/kernel/vfs/fs/littlefs/lfs.c
+                    ${CMAKE_CURRENT_LIST_DIR}/kernel/vfs/fs/littlefs/lfs_util.c
+                    ${CMAKE_CURRENT_LIST_DIR}/kernel/vfs/fs/littlefs/lfs.h
+                    ${CMAKE_CURRENT_LIST_DIR}/kernel/vfs/fs/littlefs/lfs_util.h
+                VERBATIM
+            )
+
+            add_custom_target(magnolia_mklfs_tool DEPENDS ${MAGNOLIA_MKLFS_TOOL})
+
+            # Like spiffs_create_partition_image, run this unconditionally since
+            # CMake can't easily track directory contents.
+            add_custom_target(
+                magnolia_rootfs_image
+                ALL
+                COMMAND ${MAGNOLIA_MKLFS_TOOL}
+                        ${MAGNOLIA_ROOTFS_DIR}
+                        ${MAGNOLIA_LFS_IMAGE}
+                        ${MAGNOLIA_LFS_SIZE}
+                        ${CONFIG_MAGNOLIA_LITTLEFS_BLOCK_SIZE}
+                        ${CONFIG_MAGNOLIA_LITTLEFS_READ_SIZE}
+                        ${CONFIG_MAGNOLIA_LITTLEFS_PROG_SIZE}
+                        ${CONFIG_MAGNOLIA_LITTLEFS_CACHE_SIZE}
+                        ${CONFIG_MAGNOLIA_LITTLEFS_LOOKAHEAD_SIZE}
+                        ${CONFIG_MAGNOLIA_LITTLEFS_BLOCK_CYCLES}
+                DEPENDS magnolia_mklfs_tool
+                VERBATIM
+            )
+
+            set_property(DIRECTORY "${CMAKE_CURRENT_LIST_DIR}" APPEND PROPERTY
+                ADDITIONAL_CLEAN_FILES
+                ${MAGNOLIA_MKLFS_TOOL}
+                ${MAGNOLIA_LFS_IMAGE})
+
+            esptool_py_flash_to_partition(flash ${MAGNOLIA_LFS_PARTITION} ${MAGNOLIA_LFS_IMAGE})
+            add_dependencies(flash magnolia_rootfs_image)
+        endif()
+    endif()
+endif()

@@ -27,6 +27,11 @@ extern "C" {
 #define PT_PHDR         6
 #define PT_TLS          7
 
+/* Segment flags */
+#define PF_X            0x1
+#define PF_W            0x2
+#define PF_R            0x4
+
 /* Section types */
 #define SHT_NULL        0
 #define SHT_PROGBITS    1
@@ -52,6 +57,9 @@ extern "C" {
 #define STT_FILE        4
 #define STT_COMMON      5
 #define STT_TLS         6
+
+#define ELF32_ST_BIND(info)    ((info) >> 4)
+#define ELF32_ST_TYPE(info)    ((info) & 0x0f)
 
 /* Standard section names */
 #define ELF_BSS         ".bss"
@@ -145,4 +153,3 @@ typedef struct m_elf_sec {
 #ifdef __cplusplus
 }
 #endif
-

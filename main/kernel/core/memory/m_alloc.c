@@ -23,12 +23,21 @@
 
 #define TAG "m_alloc"
 
+#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
+#define MAGNOLIA_ALLOC_ALIGNMENT ((size_t)_Alignof(max_align_t))
+#else
 #define MAGNOLIA_ALLOC_ALIGNMENT (sizeof(void *))
+#endif
 #define MAGNOLIA_ALLOC_ROUND_UP(value, align)                                   (((value) + ((align) - 1)) & ~((align) - 1))
 
 #define MAGNOLIA_ALLOC_REGION_BYTES CONFIG_MAGNOLIA_ALLOC_REGION_SIZE
-#define MAGNOLIA_ALLOC_MAX_REGIONS CONFIG_MAGNOLIA_ALLOC_MAX_REGIONS_PER_JOB
-#define MAGNOLIA_ALLOC_MAX_JOB_HEAP CONFIG_MAGNOLIA_ALLOC_MAX_HEAP_SIZE_PER_JOB
+/*
+ * Keep per-job heap limits at sane minimums even if the project sdkconfig ends
+ * up with extremely small values (e.g. 1 region / 4KB), which makes ELF
+ * applets unreliable.
+ */
+#define MAGNOLIA_ALLOC_MAX_REGIONS                                               ((CONFIG_MAGNOLIA_ALLOC_MAX_REGIONS_PER_JOB) < 4 ? 4 : (CONFIG_MAGNOLIA_ALLOC_MAX_REGIONS_PER_JOB))
+#define MAGNOLIA_ALLOC_MAX_JOB_HEAP                                              ((CONFIG_MAGNOLIA_ALLOC_MAX_HEAP_SIZE_PER_JOB) < 65536 ? 65536 : (CONFIG_MAGNOLIA_ALLOC_MAX_HEAP_SIZE_PER_JOB))
 #define MAGNOLIA_ALLOC_MAGIC 0x4D41474D
 
 #if CONFIG_MAGNOLIA_ALLOC_DEBUG
@@ -115,6 +124,23 @@ static inline m_region_block_t *data_to_block(void *data)
 static inline size_t block_total_bytes(m_region_block_t *block)
 {
     return MAGNOLIA_ALLOC_BLOCK_HEADER_SIZE + block->size;
+}
+
+static bool m_alloc_ptr_in_heap_regions_locked(m_region_heap_t *heap, void *ptr)
+{
+    if (heap == NULL || ptr == NULL) {
+        return false;
+    }
+
+    uintptr_t addr = (uintptr_t)ptr;
+    for (m_region_t *region = heap->regions; region != NULL; region = region->next) {
+        uintptr_t start = (uintptr_t)region->base + MAGNOLIA_ALLOC_BLOCK_HEADER_SIZE;
+        uintptr_t end = (uintptr_t)region->base + region->size;
+        if (addr >= start && addr < end) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void global_stats_add_region(size_t bytes)
@@ -481,52 +507,6 @@ void m_alloc_init(void)
     g_system_job_ctx = ctx;
 }
 
-void *malloc(size_t size)
-{
-    return m_job_alloc(NULL, size);
-}
-
-void *calloc(size_t nmemb, size_t size)
-{
-    return m_job_calloc(NULL, nmemb, size);
-}
-
-void *realloc(void *ptr, size_t new_size)
-{
-    return m_job_realloc(NULL, ptr, new_size);
-}
-
-void free(void *ptr)
-{
-    m_job_free(NULL, ptr);
-}
-
-#if CONFIG_LIBC_NEWLIB
-void *_malloc_r(struct _reent *r, size_t size)
-{
-    (void)r;
-    return malloc(size);
-}
-
-void *_realloc_r(struct _reent *r, void *ptr, size_t size)
-{
-    (void)r;
-    return realloc(ptr, size);
-}
-
-void _free_r(struct _reent *r, void *ptr)
-{
-    (void)r;
-    free(ptr);
-}
-
-void *_calloc_r(struct _reent *r, size_t nmemb, size_t size)
-{
-    (void)r;
-    return calloc(nmemb, size);
-}
-#endif
-
 void *m_job_alloc(job_ctx_t *ctx, size_t size)
 {
     if (size == 0) {
@@ -655,6 +635,19 @@ void m_job_free(job_ctx_t *ctx, void *ptr)
     m_region_block_t *block = m_region_block_from_ptr(ptr);
     if (block == NULL) {
         if (is_system) {
+            /*
+             * Never fallback-free a pointer that lies inside the job allocator
+             * regions: if the magic is corrupted, calling heap_caps_free() on
+             * an interior pointer will corrupt ESP-IDF's heap and eventually
+             * assert in TLSF.
+             */
+            portENTER_CRITICAL(&heap->lock);
+            bool in_regions = m_alloc_ptr_in_heap_regions_locked(heap, ptr);
+            portEXIT_CRITICAL(&heap->lock);
+            if (in_regions) {
+                m_alloc_report_error(target, "free header corrupted", ptr);
+                return;
+            }
             m_alloc_fallback_free(ptr);
             return;
         }
@@ -737,3 +730,140 @@ void m_alloc_get_global_stats(magnolia_alloc_global_stats_t *out)
     out->total_frees = g_alloc_globals.total_frees;
     portEXIT_CRITICAL(&g_alloc_stats_lock);
 }
+
+#if CONFIG_MAGNOLIA_ALLOC_WRAP_LIBC
+/* Provided by the linker when using -Wl,--wrap=... */
+void *__real_malloc(size_t size);
+void *__real_calloc(size_t nmemb, size_t size);
+void *__real_realloc(void *ptr, size_t size);
+void __real_free(void *ptr);
+
+#if CONFIG_LIBC_NEWLIB
+void *__real__malloc_r(struct _reent *r, size_t size);
+void *__real__calloc_r(struct _reent *r, size_t nmemb, size_t size);
+void *__real__realloc_r(struct _reent *r, void *ptr, size_t size);
+void __real__free_r(struct _reent *r, void *ptr);
+#endif
+
+static bool m_alloc_ptr_in_job_regions(job_ctx_t *ctx, void *ptr)
+{
+    if (ctx == NULL || ptr == NULL) {
+        return false;
+    }
+    m_region_heap_t *heap = ctx->region_heap;
+    if (heap == NULL) {
+        return false;
+    }
+
+    portENTER_CRITICAL(&heap->lock);
+    bool in_regions = m_alloc_ptr_in_heap_regions_locked(heap, ptr);
+    portEXIT_CRITICAL(&heap->lock);
+    return in_regions;
+}
+
+void *__wrap_malloc(size_t size)
+{
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED && jctx_current() != NULL) {
+        return m_job_alloc(NULL, size);
+    }
+    return __real_malloc(size);
+}
+
+void *__wrap_calloc(size_t nmemb, size_t size)
+{
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED && jctx_current() != NULL) {
+        return m_job_calloc(NULL, nmemb, size);
+    }
+    return __real_calloc(nmemb, size);
+}
+
+void *__wrap_realloc(void *ptr, size_t size)
+{
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
+        job_ctx_t *ctx = jctx_current();
+        if (ctx != NULL) {
+            if (ptr == NULL || m_alloc_ptr_in_job_regions(ctx, ptr)) {
+                return m_job_realloc(ctx, ptr, size);
+            }
+            m_alloc_report_error(ctx, "realloc pointer mismatch", ptr);
+            return NULL;
+        }
+    }
+    return __real_realloc(ptr, size);
+}
+
+void __wrap_free(void *ptr)
+{
+    if (ptr == NULL) {
+        return;
+    }
+
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
+        job_ctx_t *ctx = jctx_current();
+        if (ctx != NULL) {
+            if (m_alloc_ptr_in_job_regions(ctx, ptr)) {
+                m_job_free(ctx, ptr);
+                return;
+            }
+            m_alloc_report_error(ctx, "free pointer mismatch", ptr);
+            return;
+        }
+    }
+
+    __real_free(ptr);
+}
+
+#if CONFIG_LIBC_NEWLIB
+void *__wrap__malloc_r(struct _reent *r, size_t size)
+{
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED && jctx_current() != NULL) {
+        return m_job_alloc(NULL, size);
+    }
+    return __real__malloc_r(r, size);
+}
+
+void *__wrap__calloc_r(struct _reent *r, size_t nmemb, size_t size)
+{
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED && jctx_current() != NULL) {
+        return m_job_calloc(NULL, nmemb, size);
+    }
+    return __real__calloc_r(r, nmemb, size);
+}
+
+void *__wrap__realloc_r(struct _reent *r, void *ptr, size_t size)
+{
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
+        job_ctx_t *ctx = jctx_current();
+        if (ctx != NULL) {
+            if (ptr == NULL || m_alloc_ptr_in_job_regions(ctx, ptr)) {
+                return m_job_realloc(ctx, ptr, size);
+            }
+            m_alloc_report_error(ctx, "realloc pointer mismatch", ptr);
+            return NULL;
+        }
+    }
+    return __real__realloc_r(r, ptr, size);
+}
+
+void __wrap__free_r(struct _reent *r, void *ptr)
+{
+    if (ptr == NULL) {
+        return;
+    }
+
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
+        job_ctx_t *ctx = jctx_current();
+        if (ctx != NULL) {
+            if (m_alloc_ptr_in_job_regions(ctx, ptr)) {
+                m_job_free(ctx, ptr);
+                return;
+            }
+            m_alloc_report_error(ctx, "free pointer mismatch", ptr);
+            return;
+        }
+    }
+
+    __real__free_r(r, ptr);
+}
+#endif
+#endif

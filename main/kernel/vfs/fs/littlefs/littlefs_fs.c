@@ -45,9 +45,12 @@ typedef struct {
 } littlefs_node_data_t;
 
 typedef struct {
-    lfs_file_t file;
     littlefs_mount_data_t *mount;
     bool is_dir;
+    union {
+        lfs_file_t file;
+        lfs_dir_t dir;
+    } handle;
 } littlefs_file_data_t;
 
 static const struct m_vfs_fs_ops s_littlefs_ops;
@@ -177,11 +180,13 @@ littlefs_file_destroy(m_vfs_file_t *file)
 
     littlefs_file_data_t *data = file->fs_private;
     if (data->mount != NULL) {
-        if (!data->is_dir) {
-            if (littlefs_lock_take(data->mount)) {
-                lfs_file_close(&data->mount->lfs, &data->file);
-                littlefs_lock_give(data->mount);
+        if (littlefs_lock_take(data->mount)) {
+            if (data->is_dir) {
+                (void)lfs_dir_close(&data->mount->lfs, &data->handle.dir);
+            } else {
+                (void)lfs_file_close(&data->mount->lfs, &data->handle.file);
             }
+            littlefs_lock_give(data->mount);
         }
     }
     vPortFree(data);
@@ -610,6 +615,7 @@ littlefs_open(m_vfs_node_t *node,
     if (file_data == NULL) {
         return M_VFS_ERR_NO_MEMORY;
     }
+    memset(file_data, 0, sizeof(*file_data));
     file_data->mount = data;
     file_data->is_dir = node_data->is_dir;
 
@@ -618,8 +624,24 @@ littlefs_open(m_vfs_node_t *node,
             vPortFree(file_data);
             return M_VFS_ERR_INVALID_PARAM;
         }
+        if (!littlefs_lock_take(data)) {
+            vPortFree(file_data);
+            return M_VFS_ERR_TIMEOUT;
+        }
+        int err = lfs_dir_open(&data->lfs,
+                               &file_data->handle.dir,
+                               littlefs_path_for_lfs(node_data->path));
+        littlefs_lock_give(data);
+        if (err < 0) {
+            vPortFree(file_data);
+            return littlefs_error_translate(err);
+        }
         m_vfs_file_t *file = m_vfs_file_create(node);
         if (file == NULL) {
+            if (littlefs_lock_take(data)) {
+                (void)lfs_dir_close(&data->lfs, &file_data->handle.dir);
+                littlefs_lock_give(data);
+            }
             vPortFree(file_data);
             return M_VFS_ERR_NO_MEMORY;
         }
@@ -649,7 +671,7 @@ littlefs_open(m_vfs_node_t *node,
         return M_VFS_ERR_TIMEOUT;
     }
     int err = lfs_file_open(&data->lfs,
-                             &file_data->file,
+                             &file_data->handle.file,
                              littlefs_path_for_lfs(node_data->path),
                              lfs_flags);
     littlefs_lock_give(data);
@@ -662,7 +684,7 @@ littlefs_open(m_vfs_node_t *node,
     m_vfs_file_t *file = m_vfs_file_create(node);
     if (file == NULL) {
         if (littlefs_lock_take(data)) {
-            lfs_file_close(&data->lfs, &file_data->file);
+            (void)lfs_file_close(&data->lfs, &file_data->handle.file);
             littlefs_lock_give(data);
         }
         vPortFree(file_data);
@@ -702,7 +724,7 @@ littlefs_read(m_vfs_file_t *file,
         return M_VFS_ERR_TIMEOUT;
     }
     lfs_ssize_t result = lfs_file_read(&data->mount->lfs,
-                                       &data->file,
+                                       &data->handle.file,
                                        buffer,
                                        size);
     littlefs_lock_give(data->mount);
@@ -737,11 +759,11 @@ littlefs_write(m_vfs_file_t *file,
         return M_VFS_ERR_TIMEOUT;
     }
     lfs_ssize_t result = lfs_file_write(&data->mount->lfs,
-                                        &data->file,
+                                        &data->handle.file,
                                         buffer,
                                         size);
     if (result >= 0) {
-        lfs_file_sync(&data->mount->lfs, &data->file);
+        (void)lfs_file_sync(&data->mount->lfs, &data->handle.file);
     }
     littlefs_lock_give(data->mount);
 
@@ -773,22 +795,45 @@ littlefs_readdir(m_vfs_file_t *dir,
         return M_VFS_ERR_INVALID_PARAM;
     }
 
-    lfs_dir_t ldir;
-    if (!littlefs_lock_take(data)) {
-        return M_VFS_ERR_TIMEOUT;
-    }
-    int err = lfs_dir_open(&data->lfs,
-                           &ldir,
-                           littlefs_path_for_lfs(node_data->path));
-    if (err < 0) {
-        littlefs_lock_give(data);
-        return littlefs_error_translate(err);
+    littlefs_file_data_t *file_data = dir->fs_private;
+    if (file_data == NULL || !file_data->is_dir) {
+        return M_VFS_ERR_INVALID_PARAM;
     }
 
     size_t count = 0;
+    if (!littlefs_lock_take(data)) {
+        return M_VFS_ERR_TIMEOUT;
+    }
+
+    lfs_soff_t current_pos = lfs_dir_tell(&data->lfs, &file_data->handle.dir);
+    if (current_pos < 0) {
+        littlefs_lock_give(data);
+        return littlefs_error_translate((int)current_pos);
+    }
+
+    size_t desired_pos = 0;
+    portENTER_CRITICAL(&dir->lock);
+    desired_pos = dir->offset;
+    portEXIT_CRITICAL(&dir->lock);
+
+    if (desired_pos != (size_t)current_pos) {
+        int seek_err = 0;
+        if (desired_pos == 0) {
+            seek_err = lfs_dir_rewind(&data->lfs, &file_data->handle.dir);
+        } else {
+            seek_err = lfs_dir_seek(&data->lfs,
+                                    &file_data->handle.dir,
+                                    (lfs_off_t)desired_pos);
+        }
+        if (seek_err < 0) {
+            littlefs_lock_give(data);
+            return littlefs_error_translate(seek_err);
+        }
+    }
+
     struct lfs_info info;
     while (count < capacity) {
-        err = lfs_dir_read(&data->lfs, &ldir, &info);
+        int err = lfs_dir_read(&data->lfs, &file_data->handle.dir, &info);
         if (err <= 0) {
             break;
         }
@@ -802,7 +847,13 @@ littlefs_readdir(m_vfs_file_t *dir,
         entries[count].node = NULL;
         ++count;
     }
-    lfs_dir_close(&data->lfs, &ldir);
+
+    lfs_soff_t new_pos = lfs_dir_tell(&data->lfs, &file_data->handle.dir);
+    if (new_pos >= 0) {
+        portENTER_CRITICAL(&dir->lock);
+        dir->offset = (size_t)new_pos;
+        portEXIT_CRITICAL(&dir->lock);
+    }
     littlefs_lock_give(data);
 
     *populated = count;
@@ -860,10 +911,6 @@ littlefs_setattr(m_vfs_node_t *node,
     (void)stat;
     if (node == NULL || stat == NULL) {
         return M_VFS_ERR_INVALID_PARAM;
-    }
-
-    if (stat->size == 0) {
-        return M_VFS_ERR_OK;
     }
 
     littlefs_node_data_t *node_data = node->fs_private;
