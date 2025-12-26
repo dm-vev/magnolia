@@ -180,6 +180,7 @@ if(CONFIG_MAGNOLIA_ELF_ENABLED)
         "kernel/core/elf/m_elf_loader.c"
         "kernel/core/elf/m_elf_platform.c"
         "kernel/core/elf/m_elf_symbol.c"
+        "kernel/core/elf/m_elf_app_api.c"
         "kernel/core/libc/m_libc_compat.c"
     )
 

@@ -1,11 +1,9 @@
-extern fn write(fd: i32, buf: [*]const u8, len: usize) isize;
+const mg = @import("magnolia");
 
-pub export fn app_main(argc: i32, argv: [*]?[*:0]u8) callconv(.C) i32 {
+pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
     _ = argc;
     _ = argv;
 
-    const msg: []const u8 = "Hello world!\n";
-    _ = write(1, msg.ptr, msg.len);
+    mg.io.puts("Hello from Zig (Magnolia SDK)!");
     return 0;
 }
-

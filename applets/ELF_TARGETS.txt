@@ -5,3 +5,7 @@ elftest
 zighello
 rshello
 gohello
+rusthello
+rselftest
+goargs
+gotest

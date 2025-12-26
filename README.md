@@ -40,6 +40,9 @@ make qemu
 - `applets/sh/` — small shell that runs ELF from `/bin` (supports `>` and `>>` for stdout).
 - `rootfs/` — filesystem tree packed into a LittleFS image (see `tools/applets.py`).
 - `tools/applets.py` — builds ELF applets and packs `rootfs/` into `build/vfs.bin`.
+- `sdk/tinygo/` — TinyGo applet SDK (Go package + CMake helpers).
+- `sdk/rust/` — Rust applet SDK (`sdk/rust/README.md`).
+- `sdk/zig/` — Zig applet SDK (`sdk/zig/README.md`).
 
 ## QUICK DEMO (inside Magnolia)
 
@@ -50,9 +53,16 @@ cat /flash/README.txt
 echo Hello > /flash/test.txt
 echo world >> /flash/test.txt
 cat /flash/test.txt
+kill -l
 zighello
+zigdemo
+zigtest
 rshello
 gohello
+goargs
+gotest
+rusthello
+rselftest
 ```
 
 ## CONFIGURATION

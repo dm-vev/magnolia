@@ -23,6 +23,7 @@
 #include <time.h>
 #include "esp_log.h"
 
+#include "kernel/core/elf/m_elf_app_api.h"
 #include "kernel/core/elf/m_elf_loader.h"
 #include "kernel/core/elf/m_elf_symbol.h"
 #include "kernel/core/libc/m_libc_compat.h"
@@ -298,6 +299,9 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     { "calloc", (void *)m_libc_calloc },
     { "realloc", (void *)m_libc_realloc },
     { "free", (void *)m_libc_free },
+
+    /* System info */
+    M_ELFSYM_EXPORT(m_meminfo),
 
     /* Magnolia ELF exec helpers (used by /bin/sh and friends) */
     { "m_elf_run_file", (void *)m_elf_run_file },

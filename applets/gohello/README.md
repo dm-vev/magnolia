@@ -15,6 +15,8 @@ The resulting applet is `build/gohello.app.elf`.
 
 ### Notes
 
-TinyGo does not currently emit Xtensa PIC, so the build post-processes the TinyGo object with `xtensa-esp32s3-elf-objcopy` to mark the `.literal` section writable (WAX), and links the final applet with text relocations enabled (`-Wl,-z,notext`).
+This applet uses the shared Magnolia TinyGo SDK (`sdk/tinygo/`).
 
-This applet also provides a minimal BSS-backed TinyGo heap in `applets/gohello/main/tinygo_symbols.S`. The heap is intentionally small to stay within Magnolia's job allocator single-allocation limit.
+TinyGo does not currently emit Xtensa PIC, so the build post-processes the TinyGo object to mark the `.literal` section writable (WAX), and links the final applet with text relocations enabled (`-Wl,-z,notext`).
+
+The applet also links a minimal BSS-backed TinyGo heap from `sdk/tinygo/runtime/tinygo_symbols.S`. The heap is intentionally small to stay within Magnolia's job allocator single-allocation limit.

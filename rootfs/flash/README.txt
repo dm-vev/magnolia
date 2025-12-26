@@ -12,6 +12,8 @@ Examples:
 Applets live in `/bin`:
   ls /bin
   zighello
+  zigdemo
+  zigtest
   rshello
   gohello
   elftest
