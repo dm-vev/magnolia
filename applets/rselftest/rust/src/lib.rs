@@ -3,6 +3,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
+use core::time::Duration;
 
 use magnolia_applet::errno::{Error, Result};
 use magnolia_applet::sys;
@@ -50,6 +51,67 @@ fn test_error_path() -> Result<()> {
     Ok(())
 }
 
+fn test_dir_iter() -> Result<()> {
+    let dir_path = "/flash/rselftest_dir";
+    let file_a = "/flash/rselftest_dir/a";
+    let file_b = "/flash/rselftest_dir/b";
+
+    if let Err(e) = magnolia_applet::fs::mkdir(dir_path, 0o777) {
+        if e.errno != 17 {
+            return Err(e); // EEXIST is ok
+        }
+    };
+
+    let f = magnolia_applet::fs::File::open(file_a, sys::O_CREAT | sys::O_TRUNC | sys::O_RDWR, 0o666)?;
+    f.write_all(b"a")?;
+    drop(f);
+    let f = magnolia_applet::fs::File::open(file_b, sys::O_CREAT | sys::O_TRUNC | sys::O_RDWR, 0o666)?;
+    f.write_all(b"b")?;
+    drop(f);
+
+    let mut dir = magnolia_applet::dir::Dir::open(dir_path)?;
+    let mut seen_a = false;
+    let mut seen_b = false;
+    while let Some(ent) = dir.next()? {
+        if ent.name.as_slice() == b"a" {
+            seen_a = true;
+        }
+        if ent.name.as_slice() == b"b" {
+            seen_b = true;
+        }
+    }
+    if !seen_a || !seen_b {
+        return Err(Error { errno: 5 }); // EIO
+    }
+
+    magnolia_applet::fs::unlink(file_a)?;
+    magnolia_applet::fs::unlink(file_b)?;
+    let _ = magnolia_applet::fs::remove(dir_path);
+    Ok(())
+}
+
+fn test_time() -> Result<()> {
+    let t0 = magnolia_applet::time::monotonic_duration()?;
+    magnolia_applet::time::nanosleep(Duration::from_millis(5))?;
+    let t1 = magnolia_applet::time::monotonic_duration()?;
+    if t1 <= t0 {
+        return Err(Error { errno: 5 }); // EIO
+    }
+    Ok(())
+}
+
+fn test_cwd() -> Result<()> {
+    let before = magnolia_applet::fs::getcwd()?;
+    magnolia_applet::fs::chdir("/")?;
+    let after = magnolia_applet::fs::getcwd()?;
+    if after.as_slice() != b"/" {
+        return Err(Error { errno: 5 }); // EIO
+    }
+    let before_s = core::str::from_utf8(before.as_slice()).unwrap_or("/");
+    magnolia_applet::fs::chdir(before_s)?;
+    Ok(())
+}
+
 fn main(_args: magnolia_applet::Args) -> i32 {
     magnolia_applet::println!("rselftest start");
 
@@ -76,9 +138,29 @@ fn main(_args: magnolia_applet::Args) -> i32 {
         magnolia_applet::println!("error-path test ok errno={}", magnolia_applet::errno());
     }
 
+    if let Err(e) = test_dir_iter() {
+        fails += 1;
+        magnolia_applet::eprintln!("dir test failed: {:?}", e);
+    } else {
+        magnolia_applet::println!("dir test ok");
+    }
+
+    if let Err(e) = test_time() {
+        fails += 1;
+        magnolia_applet::eprintln!("time test failed: {:?}", e);
+    } else {
+        magnolia_applet::println!("time test ok");
+    }
+
+    if let Err(e) = test_cwd() {
+        fails += 1;
+        magnolia_applet::eprintln!("cwd test failed: {:?}", e);
+    } else {
+        magnolia_applet::println!("cwd test ok");
+    }
+
     magnolia_applet::println!("rselftest finished fails={}", fails);
     if fails == 0 { 0 } else { 1 }
 }
 
 magnolia_applet::entry!(main);
-

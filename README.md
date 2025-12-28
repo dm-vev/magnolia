@@ -70,3 +70,4 @@ rselftest
 `idf.py menuconfig` → `MagnoliaOS Configuration`:
 - LittleFS/VFS settings (`/flash` mount and sizes);
 - task/memory limits and debug options.
+- framebuffer settings (`/dev/fb0`, backend selection, panel pins).

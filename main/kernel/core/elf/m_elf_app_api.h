@@ -14,7 +14,7 @@ extern "C" {
  * ABI notes:
  * - Caller sets `size` to sizeof(magnolia_meminfo_t) it expects.
  * - Kernel fills up to min(size, sizeof(magnolia_meminfo_t)).
- * - `version` is currently 1.
+ * - `version` is currently 2.
  */
 typedef struct {
     uint32_t size;
@@ -29,6 +29,7 @@ typedef struct {
     size_t job_used_bytes;
     size_t job_peak_bytes;
     size_t job_region_count;
+    size_t job_limit_bytes;
 } magnolia_meminfo_t;
 
 /**
@@ -45,4 +46,3 @@ int m_meminfo(magnolia_meminfo_t *info);
 #endif
 
 #endif /* MAGNOLIA_ELF_APP_API_H */
-

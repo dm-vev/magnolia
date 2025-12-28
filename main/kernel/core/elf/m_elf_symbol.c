@@ -19,6 +19,7 @@
 #include <sys/time.h>
 #include <sys/times.h>
 #include <ctype.h>
+#include <setjmp.h>
 #include <math.h>
 #include <time.h>
 #include "esp_log.h"
@@ -37,6 +38,9 @@ extern int opterr;
 extern int optopt;
 int getopt(int argc, char *const argv[], const char *optstring);
 extern char **environ;
+
+/* libgcc helpers often referenced by TinyGo/Zig/Rust applets. */
+extern int __unorddf2(double x, double y);
 
 struct dyn_m_elfsym {
     const char *name;
@@ -239,6 +243,10 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     M_ELFSYM_EXPORT(vfscanf),
     M_ELFSYM_EXPORT(vsscanf),
 
+    /* setjmp / longjmp */
+    M_ELFSYM_EXPORT(setjmp),
+    M_ELFSYM_EXPORT(longjmp),
+
     /* getopt + environment */
     M_ELFSYM_EXPORT(getopt),
     M_ELFSYM_EXPORT(optarg),
@@ -286,6 +294,8 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     M_ELFSYM_EXPORT(cos),
     M_ELFSYM_EXPORT(tan),
 #endif
+    /* libgcc floating-point compare helper (ROM-backed on ESP chips) */
+    M_ELFSYM_EXPORT(__unorddf2),
 
     /* stdlib helpers commonly used by small tools */
     M_ELFSYM_EXPORT(qsort),

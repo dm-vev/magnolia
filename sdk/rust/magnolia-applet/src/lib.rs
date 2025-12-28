@@ -6,14 +6,17 @@ extern crate alloc;
 pub use magnolia_applet_sys as sys;
 
 pub mod args;
+pub mod dir;
 pub mod errno;
 pub mod fs;
+pub mod gpio;
 pub mod io;
 pub mod rt;
 pub mod time;
 
 pub use args::Args;
 pub use errno::{errno, Error, Result};
+pub use gpio::Gpio;
 
 #[macro_export]
 macro_rules! entry {

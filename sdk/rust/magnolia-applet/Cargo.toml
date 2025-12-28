@@ -9,3 +9,6 @@ path = "src/lib.rs"
 [dependencies]
 magnolia-applet-sys = { path = "../magnolia-applet-sys" }
 
+[features]
+default = ["panic_print"]
+panic_print = []

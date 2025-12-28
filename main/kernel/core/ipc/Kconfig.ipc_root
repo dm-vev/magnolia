@@ -29,11 +29,11 @@ config MAGNOLIA_IPC_SELFTESTS
 		Run the built-in IPC regression suites during boot.
 
 if MAGNOLIA_IPC_ENABLED
-	source "../main/kernel/core/ipc/Kconfig.ipc_signal"
-	source "../main/kernel/core/ipc/Kconfig.ipc_channel"
-	source "../main/kernel/core/ipc/Kconfig.ipc_event_flags"
-	source "../main/kernel/core/ipc/Kconfig.ipc_waitset"
-	source "../main/kernel/core/ipc/Kconfig.ipc_shm"
+	source "$srctree/main/kernel/core/ipc/Kconfig.ipc_signal"
+	source "$srctree/main/kernel/core/ipc/Kconfig.ipc_channel"
+	source "$srctree/main/kernel/core/ipc/Kconfig.ipc_event_flags"
+	source "$srctree/main/kernel/core/ipc/Kconfig.ipc_waitset"
+	source "$srctree/main/kernel/core/ipc/Kconfig.ipc_shm"
 endif
 
 endmenu

@@ -50,6 +50,8 @@ void m_alloc_teardown_job_ctx(job_ctx_t *ctx);
 
 void m_alloc_get_job_stats(job_ctx_t *ctx, magnolia_alloc_job_stats_t *out);
 void m_alloc_get_global_stats(magnolia_alloc_global_stats_t *out);
+size_t m_alloc_get_job_heap_limit_bytes(void);
+bool m_alloc_set_job_heap_limit_bytes(size_t bytes);
 
 #ifdef __cplusplus
 }

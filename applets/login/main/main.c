@@ -59,7 +59,9 @@ int main(int argc, char **argv)
     (void)argv;
 
     char user[32];
-    char *sh_argv[] = { (char *)"sh", NULL };
+    static char sh_argv0[] = "sh";
+    static char sh_path[] = "/bin/sh";
+    char *sh_argv[] = { sh_argv0, NULL };
 
     while (1) {
         console_puts("login: ");
@@ -74,13 +76,12 @@ int main(int argc, char **argv)
         }
 
         int rc = 0;
-        int ret = m_elf_run_file("/bin/sh", 1, sh_argv, &rc);
+        int ret = m_elf_run_file(sh_path, 1, sh_argv, &rc);
         if (ret != 0) {
-            printf("login: m_elf_run_file(/bin/sh) failed ret=%d\n", ret);
+            printf("login: m_elf_run_file(%s) failed ret=%d\n", sh_path, ret);
             sleep(1);
             continue;
         }
         (void)rc;
     }
 }
-

@@ -39,6 +39,7 @@ typedef struct m_elf {
     uint32_t        fini_count;
     int (*entry)(int argc, char *argv[]);
     job_ctx_t       *ctx;
+    uint8_t         prefer_section;
 } m_elf_t;
 
 int m_elf_init(m_elf_t *elf, job_ctx_t *ctx);

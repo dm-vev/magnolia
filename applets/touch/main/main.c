@@ -70,6 +70,9 @@ static int touch_one(const char *path, bool no_create)
 
 int main(int argc, char **argv)
 {
+    extern int optind;
+    optind = 1;
+
     for (int i = 1; i < argc; ++i) {
         if (streq(argv[i], "--help")) {
             print_help();
@@ -115,4 +118,3 @@ int main(int argc, char **argv)
     }
     return failed ? 1 : 0;
 }
-

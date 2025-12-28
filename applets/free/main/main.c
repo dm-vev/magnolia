@@ -1,7 +1,7 @@
 #include <errno.h>
-#include <getopt.h>
 #include <stdbool.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -9,6 +9,47 @@
 #include "kernel/core/elf/m_elf_app_api.h"
 
 static const char *g_version = "Magnolia coreutils 0.1";
+
+static uint64_t u64_div(uint64_t n, uint64_t d)
+{
+    if (d == 0) {
+        return 0;
+    }
+    uint64_t q = 0;
+    for (int i = 63; i >= 0; --i) {
+        if ((n >> i) >= d) {
+            n -= d << i;
+            q |= 1ULL << i;
+        }
+    }
+    return q;
+}
+
+static void u64_divmod(uint64_t n, uint64_t d, uint64_t *q, uint64_t *r)
+{
+    if (d == 0) {
+        if (q) {
+            *q = 0;
+        }
+        if (r) {
+            *r = n;
+        }
+        return;
+    }
+    uint64_t qv = 0;
+    for (int i = 63; i >= 0; --i) {
+        if ((n >> i) >= d) {
+            n -= d << i;
+            qv |= 1ULL << i;
+        }
+    }
+    if (q) {
+        *q = qv;
+    }
+    if (r) {
+        *r = n;
+    }
+}
 
 static void eprintf(const char *fmt, ...)
 {
@@ -96,16 +137,25 @@ static const char *unit_label(unit_t unit)
 static void fmt_human(uint64_t bytes, char out[16])
 {
     static const char *suffix[] = { "B", "KiB", "MiB", "GiB", "TiB" };
-    double v = (double)bytes;
+    uint64_t divisor = 1;
     int i = 0;
-    while (v >= 1024.0 && i < 4) {
-        v /= 1024.0;
+    while (i < 4 && divisor <= (UINT64_MAX / 1024) && bytes >= (divisor * 1024)) {
+        divisor *= 1024;
         i++;
     }
-    if (v < 10.0 && i > 0) {
-        (void)snprintf(out, 16, "%.1f%s", v, suffix[i]);
+    uint64_t whole = 0;
+    uint64_t rem = 0;
+    u64_divmod(bytes, divisor, &whole, &rem);
+    if (i > 0 && whole < 10) {
+        uint64_t frac = u64_div(rem * 10, divisor);
+        (void)snprintf(out, 16, "%llu.%llu%s",
+                       (unsigned long long)whole,
+                       (unsigned long long)frac,
+                       suffix[i]);
     } else {
-        (void)snprintf(out, 16, "%.0f%s", v, suffix[i]);
+        (void)snprintf(out, 16, "%llu%s",
+                       (unsigned long long)whole,
+                       suffix[i]);
     }
 }
 
@@ -116,7 +166,7 @@ static void fmt_value(unit_t unit, uint64_t bytes, char out[16])
         return;
     }
     uint64_t div = unit_divisor(unit);
-    uint64_t v = div ? (bytes / div) : bytes;
+    uint64_t v = div ? u64_div(bytes, div) : bytes;
     (void)snprintf(out, 16, "%llu", (unsigned long long)v);
 }
 
@@ -132,7 +182,7 @@ static void print_row(unit_t unit,
                       uint64_t regions)
 {
     char total_s[16], used_s[16], free_s[16];
-    char min_s[16], large_s[16], peak_s[16], region_s[16];
+    char min_s[16], large_s[16], peak_s[16], region_s[32];
 
     fmt_value(unit, total_bytes, total_s);
     fmt_value(unit, used_bytes, used_s);
@@ -181,50 +231,61 @@ static void print_row(unit_t unit,
 
 int main(int argc, char **argv)
 {
+    unit_t unit = UNIT_KIB;
+    bool verbose = false;
+    bool end_opts = false;
+
     for (int i = 1; i < argc; ++i) {
-        if (streq(argv[i], "--help")) {
+        const char *arg = argv[i];
+        if (arg == NULL) {
+            continue;
+        }
+
+        if (!end_opts && strcmp(arg, "--") == 0) {
+            end_opts = true;
+            continue;
+        }
+
+        if (!end_opts && strcmp(arg, "--help") == 0) {
             print_help();
             return 0;
         }
-        if (streq(argv[i], "--version")) {
+        if (!end_opts && strcmp(arg, "--version") == 0) {
             print_version();
             return 0;
         }
-    }
 
-    unit_t unit = UNIT_KIB;
-    bool verbose = false;
-
-    int opt;
-    while ((opt = getopt(argc, argv, "bkmghv")) != -1) {
-        switch (opt) {
-        case 'b':
-            unit = UNIT_BYTES;
-            break;
-        case 'k':
-            unit = UNIT_KIB;
-            break;
-        case 'm':
-            unit = UNIT_MIB;
-            break;
-        case 'g':
-            unit = UNIT_GIB;
-            break;
-        case 'h':
-            unit = UNIT_HUMAN;
-            break;
-        case 'v':
-            verbose = true;
-            break;
-        default:
-            eprintf("usage: free [-b|-k|-m|-g|-h] [-v]\n");
-            eprintf("try 'free --help'\n");
-            return 1;
+        if (!end_opts && arg[0] == '-' && arg[1] != '\0') {
+            for (const char *opt = arg + 1; *opt != '\0'; ++opt) {
+                switch (*opt) {
+                case 'b':
+                    unit = UNIT_BYTES;
+                    break;
+                case 'k':
+                    unit = UNIT_KIB;
+                    break;
+                case 'm':
+                    unit = UNIT_MIB;
+                    break;
+                case 'g':
+                    unit = UNIT_GIB;
+                    break;
+                case 'h':
+                    unit = UNIT_HUMAN;
+                    break;
+                case 'v':
+                    verbose = true;
+                    break;
+                default:
+                    eprintf("usage: free [-b|-k|-m|-g|-h] [-v]\n");
+                    eprintf("try 'free --help'\n");
+                    return 1;
+                }
+            }
+            continue;
         }
-    }
 
-    if (optind < argc) {
-        eprintf("free: unexpected operand: %s\n", argv[optind]);
+        eprintf("free: unexpected operand: %s\n", arg);
         eprintf("try 'free --help'\n");
         return 1;
     }
@@ -292,6 +353,15 @@ int main(int argc, char **argv)
               (uint64_t)-1,
               (uint64_t)info.job_peak_bytes,
               (uint64_t)info.job_region_count);
+
+    if (info.job_limit_bytes > 0) {
+        char limit_s[16];
+        fmt_value(unit, (uint64_t)info.job_limit_bytes, limit_s);
+        printf("JobLimit: %s", limit_s);
+        if (unit != UNIT_HUMAN) {
+            printf(" (%s)", unit_label(unit));
+        }
+        printf("\n");
+    }
     return 0;
 }
-

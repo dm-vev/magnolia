@@ -112,9 +112,10 @@ macro(magnolia_rust_project_elf project_name)
                  cd \"$tmp\"; \
                  '${CMAKE_AR}' x '${_MRPE_RUST_LIB}'; \
                  for obj in *.o; do \
+                   [ -f \"$obj\" ] || continue; \
                    for sec in $(LC_ALL=C readelf -S -W \"$obj\" | sed -n 's/^[[:space:]]*\\[[[:space:]]*[0-9]\\+\\][[:space:]]\\+\\([^ ]\\+\\).*/\\1/p'); do \
                      case \"$sec\" in \
-                       .literal*|.rodata*) '${CMAKE_OBJCOPY}' --set-section-flags \"$sec\"=alloc,load,contents,data \"$obj\" ;; \
+                       .literal*|.rodata*) '${CMAKE_OBJCOPY}' --set-section-flags \"$sec\"=alloc,load,contents,data \"$obj\" || true ;; \
                      esac; \
                    done; \
                  done; \
@@ -146,9 +147,9 @@ macro(magnolia_rust_project_elf project_name)
     # that the Xtensa linker rejects by default when producing ET_DYN.
     # Allow text relocs for Rust applets (Magnolia loader applies relocations in RAM).
     if(ELF_CFLAGS)
-        list(APPEND ELF_CFLAGS -Wl,-z,notext -Wl,-z,noexecstack)
+        list(APPEND ELF_CFLAGS -Wl,-z,notext -Wl,-z,noexecstack -Wl,-z,separate-code)
     else()
-        set(ELF_CFLAGS -Wl,-z,notext -Wl,-z,noexecstack)
+        set(ELF_CFLAGS -Wl,-z,notext -Wl,-z,noexecstack -Wl,-z,separate-code)
     endif()
 
     include(${_MAGNOLIA_ROOT}/managed_components/espressif__elf_loader/elf_loader.cmake)

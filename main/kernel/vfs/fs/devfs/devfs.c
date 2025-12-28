@@ -22,7 +22,14 @@
 #include "kernel/vfs/fs/devfs/devfs_internal.h"
 #include "kernel/vfs/fs/devfs/devfs_diag.h"
 #include "kernel/vfs/fs/devfs/devfs_ioctl.h"
+#include "kernel/vfs/fs/devfs/devfs_gpio.h"
 #include "kernel/vfs/fs/devfs/devfs_shm.h"
+#if CONFIG_MAGNOLIA_DEVFS_FB
+#include "kernel/vfs/fs/devfs/devfs_fb.h"
+#endif
+#if CONFIG_MAGNOLIA_DEVFS_ALLOC
+#include "kernel/vfs/fs/devfs/devfs_alloc.h"
+#endif
 #include "kernel/vfs/fs/devfs/devfs_stream.h"
 #include "esp_random.h"
 
@@ -1416,6 +1423,15 @@ void m_devfs_register_default_devices(void)
     devfs_register("/dev/null", &s_devfs_null_ops, NULL);
     devfs_register("/dev/zero", &s_devfs_zero_ops, NULL);
     devfs_register("/dev/random", &s_devfs_random_ops, NULL);
+#if CONFIG_MAGNOLIA_DEVFS_ALLOC
+    devfs_alloc_register();
+#endif
+#if CONFIG_MAGNOLIA_DEVFS_FB
+    devfs_fb_register();
+#endif
+#if CONFIG_MAGNOLIA_DEVFS_GPIO
+    devfs_gpio_register();
+#endif
 #if CONFIG_MAGNOLIA_IPC_ENABLED
     devfs_shm_register_devices();
 #if CONFIG_MAGNOLIA_DEVFS_PIPES

@@ -61,6 +61,13 @@ fn alloc_error(_layout: Layout) -> ! {
 #[cfg(target_os = "none")]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    crate::eprintln!("panic: {:?}", info);
+    #[cfg(feature = "panic_print")]
+    {
+        crate::eprintln!("panic: {:?}", info);
+    }
+    #[cfg(not(feature = "panic_print"))]
+    {
+        let _ = info;
+    }
     unsafe { sys::abort() }
 }

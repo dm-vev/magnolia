@@ -41,6 +41,11 @@ function(magnolia_zig_add_obj_to_component)
         message(FATAL_ERROR "magnolia_zig_add_obj_to_component: SRC is required")
     endif()
 
+    set(_mzig_pic_flag "")
+    if(MAGNOLIA_ZIG_PIC)
+        set(_mzig_pic_flag "-fPIC")
+    endif()
+
     set(MAGNOLIA_ROOT "${_MAGNOLIA_ZIG_REPO_ROOT}")
 
     if(NOT DEFINED MAGNOLIA_ZIG_TOOLCHAIN_DIR)
@@ -116,6 +121,7 @@ function(magnolia_zig_add_obj_to_component)
         # Xtensa PIC from LLVM emits a dedicated `.literal` section with relocations.
         # Mark it writable so the ELF applet link (ET_DYN) can keep dynamic relocs.
         COMMAND "${CMAKE_OBJCOPY}" --set-section-flags .literal=alloc,load,contents,data "${_mzig_obj}"
+        COMMAND "${CMAKE_OBJCOPY}" --set-section-flags .rodata=alloc,load,contents,data "${_mzig_obj}"
         DEPENDS
                 "${MZIG_SRC}"
                 "${MAGNOLIA_ROOT}/tools/zig_xtensa_toolchain.py"
@@ -129,7 +135,3 @@ function(magnolia_zig_add_obj_to_component)
     add_dependencies(${MZIG_COMPONENT_LIB} "${_mzig_name}_zig_obj")
     target_sources(${MZIG_COMPONENT_LIB} PRIVATE "${_mzig_obj}")
 endfunction()
-    set(_mzig_pic_flag "")
-    if(MAGNOLIA_ZIG_PIC)
-        set(_mzig_pic_flag "-fPIC")
-    endif()

@@ -6,21 +6,14 @@ menu "MagnoliaOS Configuration"
         help
             Приоритет корневого процесса в системе.
 
-    config MAGNOLIA_SCHED_SELFTESTS
-        bool "Run Magnolia scheduler self-tests at boot"
-        default n
-        help
-            Execute Magnolia scheduler unit tests during boot for early
-            validation of the SAL layer.
+source "$srctree/main/kernel/core/sched/Kconfig.sched"
+source "$srctree/main/kernel/core/timer/Kconfig.timer"
+source "$srctree/main/kernel/core/memory/Kconfig.memory"
 
-source "../main/kernel/core/sched/Kconfig.sched"
-source "../main/kernel/core/timer/Kconfig.timer"
-source "../main/kernel/core/memory/Kconfig.memory"
-
-source "../main/kernel/core/elf/Kconfig.elf"
-source "../main/kernel/core/job/Kconfig.job"
-source "../main/kernel/core/vfs/Kconfig.vfs"
-source "../main/kernel/vfs/fs/devfs/Kconfig.devfs"
-    source "../main/kernel/core/ipc/Kconfig.ipc_root"
+source "$srctree/main/kernel/core/elf/Kconfig.elf"
+source "$srctree/main/kernel/core/job/Kconfig.job"
+source "$srctree/main/kernel/core/vfs/Kconfig.vfs"
+source "$srctree/main/kernel/vfs/fs/devfs/Kconfig.devfs"
+source "$srctree/main/kernel/core/ipc/Kconfig.ipc_root"
 
 endmenu

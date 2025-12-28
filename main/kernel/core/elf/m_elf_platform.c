@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 
 #include "kernel/core/job/jctx.h"
 #include "kernel/core/memory/m_alloc.h"
@@ -21,9 +22,26 @@ typedef struct {
     uint32_t reserved;
 } m_elf_alloc_hdr_t;
 
+static const char *TAG = "m_elf_platform";
+
 #define M_ELF_ALLOC_MAGIC 0x454C4641u /* 'ELFA' */
 #define M_ELF_ALLOC_FLAG_EXEC 0x1u
 #define M_ELF_ALLOC_FLAG_HEAPCAPS 0x2u
+
+static void m_elf_log_exec_caps(uint32_t n)
+{
+    size_t free_exec = heap_caps_get_free_size(MALLOC_CAP_EXEC);
+    size_t largest_exec = heap_caps_get_largest_free_block(MALLOC_CAP_EXEC);
+    size_t free_spiram_exec = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_EXEC);
+    size_t largest_spiram_exec = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_EXEC);
+    ESP_LOGE(TAG,
+             "ELF exec alloc failed size=0x%x free_exec=%u largest_exec=%u free_spiram_exec=%u largest_spiram_exec=%u",
+             (unsigned)n,
+             (unsigned)free_exec,
+             (unsigned)largest_exec,
+             (unsigned)free_spiram_exec,
+             (unsigned)largest_spiram_exec);
+}
 
 void *m_elf_malloc(struct m_elf *elf, uint32_t n, bool exec)
 {
@@ -36,21 +54,41 @@ void *m_elf_malloc(struct m_elf *elf, uint32_t n, bool exec)
 #if CONFIG_ELF_LOADER_BUS_ADDRESS_MIRROR
 #ifdef CONFIG_ELF_LOADER_LOAD_PSRAM
     if (exec) {
-        /* PSRAM loader configuration: code lives in cached address space. */
-        uint32_t caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
-        raw = heap_caps_malloc(total, caps);
+        raw = heap_caps_malloc(total, MALLOC_CAP_EXEC);
         flags |= M_ELF_ALLOC_FLAG_EXEC;
-    } else {
-        raw = m_job_alloc(ctx, total);
+#if CONFIG_SPIRAM_FETCH_INSTRUCTIONS
         if (raw == NULL) {
-            raw = heap_caps_malloc(total, MALLOC_CAP_8BIT);
+            raw = heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_EXEC);
+            if (raw != NULL) {
+                flags |= M_ELF_ALLOC_FLAG_EXEC | M_ELF_ALLOC_FLAG_HEAPCAPS;
+            }
+        }
+#endif
+    } else {
+        raw = heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (raw != NULL) {
             flags |= M_ELF_ALLOC_FLAG_HEAPCAPS;
+        }
+        if (raw == NULL) {
+            raw = m_job_alloc(ctx, total);
+            if (raw == NULL) {
+                raw = heap_caps_malloc(total, MALLOC_CAP_8BIT);
+                flags |= M_ELF_ALLOC_FLAG_HEAPCAPS;
+            }
         }
     }
 #else
     if (exec) {
         raw = heap_caps_malloc(total, MALLOC_CAP_EXEC);
         flags |= M_ELF_ALLOC_FLAG_EXEC;
+#if CONFIG_SPIRAM_FETCH_INSTRUCTIONS
+        if (raw == NULL) {
+            raw = heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_EXEC);
+            if (raw != NULL) {
+                flags |= M_ELF_ALLOC_FLAG_EXEC | M_ELF_ALLOC_FLAG_HEAPCAPS;
+            }
+        }
+#endif
     } else {
         raw = m_job_alloc(ctx, total);
         if (raw == NULL) {
@@ -62,14 +100,19 @@ void *m_elf_malloc(struct m_elf *elf, uint32_t n, bool exec)
 #else
 #ifdef CONFIG_ELF_LOADER_LOAD_PSRAM
     if (exec) {
-        uint32_t caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
-        raw = heap_caps_malloc(total, caps);
+        raw = heap_caps_malloc(total, MALLOC_CAP_EXEC);
         flags |= M_ELF_ALLOC_FLAG_EXEC;
     } else {
-        raw = m_job_alloc(ctx, total);
-        if (raw == NULL) {
-            raw = heap_caps_malloc(total, MALLOC_CAP_8BIT);
+        raw = heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (raw != NULL) {
             flags |= M_ELF_ALLOC_FLAG_HEAPCAPS;
+        }
+        if (raw == NULL) {
+            raw = m_job_alloc(ctx, total);
+            if (raw == NULL) {
+                raw = heap_caps_malloc(total, MALLOC_CAP_8BIT);
+                flags |= M_ELF_ALLOC_FLAG_HEAPCAPS;
+            }
         }
     }
 #else
@@ -87,6 +130,9 @@ void *m_elf_malloc(struct m_elf *elf, uint32_t n, bool exec)
 #endif
 
     if (raw == NULL) {
+        if (exec) {
+            m_elf_log_exec_caps(n);
+        }
         return NULL;
     }
 

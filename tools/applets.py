@@ -3,7 +3,8 @@
 Build Magnolia ELF applets and pack them into LittleFS image for vfs partition.
 
 Usage:
-  python tools/applets.py build
+  python tools/applets.py build [applet...]
+  python tools/applets.py build --only applet[,applet...]
   python tools/applets.py flash [--port PORT] [--baud BAUD]  (optional, best-effort)
   python tools/applets.py qemu-image   (merge qemu_flash.bin with vfs.bin)
   python tools/applets.py qemu-inject  (patch build/qemu_flash.bin in-place)
@@ -20,11 +21,12 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 ROOT = Path(__file__).resolve().parents[1]
 APPLETS_DIR = ROOT / "applets"
-BUILD_DIR = ROOT / "build"
+BUILD_DIR = Path(os.environ.get("MAGNOLIA_BUILD_DIR", str(ROOT / "build")))
 ROOTFS_DIR = ROOT / "rootfs"
 ROOTFS_BIN_DIR = ROOTFS_DIR / "bin"
 IMAGE_PATH = BUILD_DIR / "vfs.bin"
@@ -39,10 +41,10 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 
-def run(cmd: list[str], cwd: Path | None = None) -> bool:
+def run(cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None) -> bool:
     log("+ " + " ".join(cmd))
     try:
-        subprocess.check_call(cmd, cwd=str(cwd) if cwd else None)
+        subprocess.check_call(cmd, cwd=str(cwd) if cwd else None, env=env)
         return True
     except subprocess.CalledProcessError as exc:
         log(f"Command failed ({exc.returncode}): {' '.join(cmd)}")
@@ -66,6 +68,15 @@ def parse_sdkconfig() -> dict[str, int]:
         except ValueError:
             continue
     return values
+
+
+def parse_idf_target(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    for line in path.read_text().splitlines():
+        if line.startswith("CONFIG_IDF_TARGET="):
+            return line.split("=", 1)[1].strip().strip('"')
+    return None
 
 
 def parse_partition_size() -> int:
@@ -165,27 +176,91 @@ def build_mkimage() -> None:
         raise SystemExit("Failed to build littlefs_mkimage")
 
 
-def build_applets() -> None:
-    applets = discover_applets()
+def resolve_applets(targets: list[str]) -> list[Path]:
+    if not targets:
+        return discover_applets()
+    result: list[Path] = []
+    for name in targets:
+        path = APPLETS_DIR / name
+        if not path.is_dir():
+            log(f"Skipping missing applet directory: {name}")
+            continue
+        result.append(path)
+    return result
+
+
+def parse_only_targets(args: list[str]) -> list[str]:
+    targets: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--only" and i + 1 < len(args):
+            targets += [t for t in args[i + 1].split(",") if t]
+            i += 2
+            continue
+        if arg.startswith("--only="):
+            targets += [t for t in arg.split("=", 1)[1].split(",") if t]
+            i += 1
+            continue
+        if not arg.startswith("-"):
+            targets.append(arg)
+        i += 1
+    return targets
+
+
+def build_applets(targets: list[str] | None = None) -> None:
+    applets = resolve_applets(targets or [])
     ROOTFS_BIN_DIR.mkdir(parents=True, exist_ok=True)
     if not applets:
         log("No applets found.")
         return
-    for applet in applets:
+    root_target = parse_idf_target(ROOT / "sdkconfig")
+    base_env = os.environ.copy()
+    if root_target:
+        base_env["IDF_TARGET"] = root_target
+
+    def build_one(applet: Path) -> bool:
         log(f"Building applet {applet.name} ...")
-        if not run(["idf.py", "elf"], cwd=applet):
+        if root_target:
+            applet_target = parse_idf_target(applet / "sdkconfig")
+            if applet_target != root_target:
+                log(f"Setting applet {applet.name} target to {root_target} (was {applet_target or 'unset'})")
+                if not run(["idf.py", "set-target", root_target], cwd=applet, env=base_env):
+                    log(f"Skipping failed applet target set: {applet.name}")
+                    return False
+        cache_path = applet / "build" / "CMakeCache.txt"
+        main_cmake = applet / "main" / "CMakeLists.txt"
+        elf_loader_cmake = ROOT / "managed_components" / "espressif__elf_loader" / "elf_loader.cmake"
+        reconfigure_inputs = [main_cmake, elf_loader_cmake]
+        needs_reconfigure = not cache_path.exists()
+        if not needs_reconfigure:
+            cache_mtime = cache_path.stat().st_mtime
+            needs_reconfigure = any(p.exists() and p.stat().st_mtime > cache_mtime for p in reconfigure_inputs)
+        if needs_reconfigure:
+            log(f"Reconfiguring applet {applet.name} (cmake inputs changed)")
+            if not run(["idf.py", "reconfigure"], cwd=applet, env=base_env):
+                log(f"Skipping failed applet reconfigure: {applet.name}")
+                return False
+        if not run(["idf.py", "elf"], cwd=applet, env=base_env):
             log(f"Elf target failed for {applet.name}; running `idf.py build` instead.")
-            if not run(["idf.py", "build"], cwd=applet):
+            if not run(["idf.py", "build"], cwd=applet, env=base_env):
                 log(f"Skipping failed applet build: {applet.name}")
-                continue
+                return False
         try:
             elf_path = find_output_elf(applet)
         except FileNotFoundError as exc:
             log(str(exc))
-            continue
+            return False
         out_path = ROOTFS_BIN_DIR / applet.name
         shutil.copy2(elf_path, out_path)
         log(f"Applet {applet.name} OK -> {out_path}")
+        return True
+
+    jobs = int(os.environ.get("MAGNOLIA_APPLET_JOBS", os.cpu_count() or 4))
+    with ThreadPoolExecutor(max_workers=jobs) as executor:
+        futures = {executor.submit(build_one, applet): applet for applet in applets}
+        for future in as_completed(futures):
+            _ = future.result()
 
 
 def create_image() -> None:
@@ -391,18 +466,26 @@ def qemu_merge_flash() -> None:
     if not QEMU_EFUSE_PATH.exists():
         QEMU_EFUSE_PATH.write_bytes(b"\x00" * 1024)
 
+    vfs_addr = hex(vfs_offset)
+    image_path = str(IMAGE_PATH.resolve())
+    replaced = False
+    for i in range(0, len(pairs), 2):
+        if pairs[i] == vfs_addr:
+            pairs[i + 1] = image_path
+            replaced = True
+    if not replaced:
+        pairs += [vfs_addr, image_path]
+
     cmd = [
         sys.executable,
         "-m",
         "esptool",
         f"--chip={idf_target}",
         "merge_bin",
-        f"--output={QEMU_FLASH_PATH}",
+        f"--output={QEMU_FLASH_PATH.resolve()}",
         f"--fill-flash-size={flash_size}",
         *opts,
         *pairs,
-        hex(vfs_offset),
-        str(IMAGE_PATH),
     ]
     if not run(cmd, cwd=BUILD_DIR):
         raise SystemExit("Failed to generate qemu_flash.bin with vfs.bin")
@@ -415,7 +498,8 @@ def main() -> int:
         return 2
     cmd = sys.argv[1]
     if cmd == "build":
-        build_applets()
+        targets = parse_only_targets(sys.argv[2:])
+        build_applets(targets)
         create_image()
         return 0
     if cmd == "flash":

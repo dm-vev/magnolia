@@ -12,6 +12,8 @@
 #include "sdkconfig.h"
 #include "esp_log.h"
 #include "esp_partition.h"
+#include "esp_memory_utils.h"
+#include "esp_memory_utils.h"
 #include "kernel/core/job/m_job_core.h"
 #include "kernel/core/vfs/core/m_vfs_jobcwd.h"
 #include "kernel/core/ipc/ipc_scheduler_bridge.h"
@@ -248,6 +250,12 @@ _m_vfs_build_absolute_path(m_job_id_t job,
                            size_t capacity)
 {
     if (path == NULL || out == NULL || capacity == 0) {
+        return false;
+    }
+    if (!(esp_ptr_in_dram(path) || esp_ptr_external_ram(path) || esp_ptr_in_drom(path))) {
+        return false;
+    }
+    if (!esp_ptr_byte_accessible(path)) {
         return false;
     }
 

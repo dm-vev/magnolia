@@ -11,6 +11,7 @@
 #include <sys/reent.h>
 
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
 
@@ -37,7 +38,6 @@
  * applets unreliable.
  */
 #define MAGNOLIA_ALLOC_MAX_REGIONS                                               ((CONFIG_MAGNOLIA_ALLOC_MAX_REGIONS_PER_JOB) < 4 ? 4 : (CONFIG_MAGNOLIA_ALLOC_MAX_REGIONS_PER_JOB))
-#define MAGNOLIA_ALLOC_MAX_JOB_HEAP                                              ((CONFIG_MAGNOLIA_ALLOC_MAX_HEAP_SIZE_PER_JOB) < 65536 ? 65536 : (CONFIG_MAGNOLIA_ALLOC_MAX_HEAP_SIZE_PER_JOB))
 #define MAGNOLIA_ALLOC_MAGIC 0x4D41474D
 
 #if CONFIG_MAGNOLIA_ALLOC_DEBUG
@@ -105,10 +105,52 @@ typedef struct {
 static portMUX_TYPE g_alloc_stats_lock = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
 static m_alloc_global_stats_internal_t g_alloc_globals = {0};
 static job_ctx_t *g_system_job_ctx;
+static portMUX_TYPE g_job_limit_lock = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
+static size_t g_job_heap_limit_bytes;
 
 static inline size_t align_up(size_t size)
 {
     return MAGNOLIA_ALLOC_ROUND_UP(size, MAGNOLIA_ALLOC_ALIGNMENT);
+}
+
+static size_t m_alloc_sanitize_job_heap_limit(size_t bytes)
+{
+    if (bytes == 0) {
+        return 0;
+    }
+
+    size_t min_limit = MAGNOLIA_ALLOC_REGION_BYTES;
+    if (bytes < min_limit) {
+        bytes = min_limit;
+    }
+
+    if (CONFIG_MAGNOLIA_ALLOC_MAX_HEAP_SIZE_PER_JOB > 0 &&
+            bytes > (size_t)CONFIG_MAGNOLIA_ALLOC_MAX_HEAP_SIZE_PER_JOB) {
+        bytes = (size_t)CONFIG_MAGNOLIA_ALLOC_MAX_HEAP_SIZE_PER_JOB;
+    }
+
+    bytes = MAGNOLIA_ALLOC_ROUND_UP(bytes, MAGNOLIA_ALLOC_REGION_BYTES);
+    return bytes;
+}
+
+size_t m_alloc_get_job_heap_limit_bytes(void)
+{
+    portENTER_CRITICAL(&g_job_limit_lock);
+    size_t value = g_job_heap_limit_bytes;
+    portEXIT_CRITICAL(&g_job_limit_lock);
+    return value;
+}
+
+bool m_alloc_set_job_heap_limit_bytes(size_t bytes)
+{
+    size_t value = m_alloc_sanitize_job_heap_limit(bytes);
+    if (bytes != 0 && value == 0) {
+        return false;
+    }
+    portENTER_CRITICAL(&g_job_limit_lock);
+    g_job_heap_limit_bytes = value;
+    portEXIT_CRITICAL(&g_job_limit_lock);
+    return true;
 }
 
 static inline void *block_data(m_region_block_t *block)
@@ -346,8 +388,9 @@ static bool m_region_heap_grow(m_region_heap_t *heap)
     if (MAGNOLIA_ALLOC_MAX_REGIONS > 0 && heap->region_count >= MAGNOLIA_ALLOC_MAX_REGIONS) {
         return false;
     }
-    if (MAGNOLIA_ALLOC_MAX_JOB_HEAP > 0 &&
-        heap->total_capacity + MAGNOLIA_ALLOC_REGION_BYTES > MAGNOLIA_ALLOC_MAX_JOB_HEAP) {
+    size_t heap_limit = m_alloc_get_job_heap_limit_bytes();
+    if (heap_limit > 0 &&
+        heap->total_capacity + MAGNOLIA_ALLOC_REGION_BYTES > heap_limit) {
         return false;
     }
 
@@ -505,6 +548,13 @@ void m_alloc_init(void)
         return;
     }
     g_system_job_ctx = ctx;
+
+    size_t total = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
+    size_t default_limit = 0;
+    if (total > 0) {
+        default_limit = (total * (size_t)CONFIG_MAGNOLIA_ALLOC_JOB_HEAP_DEFAULT_PERCENT) / 100U;
+    }
+    g_job_heap_limit_bytes = m_alloc_sanitize_job_heap_limit(default_limit);
 }
 
 void *m_job_alloc(job_ctx_t *ctx, size_t size)
@@ -546,14 +596,12 @@ void *m_job_calloc(job_ctx_t *ctx, size_t nmemb, size_t size)
         return NULL;
     }
 
-    job_ctx_t *logger_ctx = m_alloc_effective_ctx(ctx);
-
     size_t total = nmemb * size;
     void *ptr = m_job_alloc(ctx, total);
     if (ptr != NULL) {
         memset(ptr, 0, total);
         MAGNOLIA_ALLOC_DEBUG_LOG("job=%p calloc size=%zu ptr=%p",
-                                 logger_ctx ? logger_ctx->job_id : NULL,
+                                 ctx ? ctx->job_id : NULL,
                                  total,
                                  ptr);
     }
@@ -655,6 +703,28 @@ void m_job_free(job_ctx_t *ctx, void *ptr)
         return;
     }
     if (block->owner != heap) {
+        m_region_heap_t *owner = block->owner;
+        if (owner != NULL) {
+            portENTER_CRITICAL(&owner->lock);
+            bool in_owner = m_alloc_ptr_in_heap_regions_locked(owner, ptr);
+            if (!in_owner) {
+                portEXIT_CRITICAL(&owner->lock);
+                m_alloc_report_error(target, "free pointer mismatch", ptr);
+                return;
+            }
+            if (!block->allocated) {
+                portEXIT_CRITICAL(&owner->lock);
+                m_alloc_report_error(target, "double free", ptr);
+                return;
+            }
+            m_region_heap_free_block(owner, block);
+            MAGNOLIA_ALLOC_DEBUG_LOG("job=%p free cross-heap ptr=%p owner=%p",
+                                     target->job_id,
+                                     ptr,
+                                     owner);
+            portEXIT_CRITICAL(&owner->lock);
+            return;
+        }
         m_alloc_report_error(target, "free pointer mismatch", ptr);
         return;
     }
@@ -785,6 +855,9 @@ void *__wrap_realloc(void *ptr, size_t size)
             if (ptr == NULL || m_alloc_ptr_in_job_regions(ctx, ptr)) {
                 return m_job_realloc(ctx, ptr, size);
             }
+            if (m_region_block_from_ptr(ptr) == NULL) {
+                return __real_realloc(ptr, size);
+            }
             m_alloc_report_error(ctx, "realloc pointer mismatch", ptr);
             return NULL;
         }
@@ -803,6 +876,10 @@ void __wrap_free(void *ptr)
         if (ctx != NULL) {
             if (m_alloc_ptr_in_job_regions(ctx, ptr)) {
                 m_job_free(ctx, ptr);
+                return;
+            }
+            if (m_region_block_from_ptr(ptr) == NULL) {
+                __real_free(ptr);
                 return;
             }
             m_alloc_report_error(ctx, "free pointer mismatch", ptr);
@@ -838,6 +915,9 @@ void *__wrap__realloc_r(struct _reent *r, void *ptr, size_t size)
             if (ptr == NULL || m_alloc_ptr_in_job_regions(ctx, ptr)) {
                 return m_job_realloc(ctx, ptr, size);
             }
+            if (m_region_block_from_ptr(ptr) == NULL) {
+                return __real__realloc_r(r, ptr, size);
+            }
             m_alloc_report_error(ctx, "realloc pointer mismatch", ptr);
             return NULL;
         }
@@ -856,6 +936,10 @@ void __wrap__free_r(struct _reent *r, void *ptr)
         if (ctx != NULL) {
             if (m_alloc_ptr_in_job_regions(ctx, ptr)) {
                 m_job_free(ctx, ptr);
+                return;
+            }
+            if (m_region_block_from_ptr(ptr) == NULL) {
+                __real__free_r(r, ptr);
                 return;
             }
             m_alloc_report_error(ctx, "free pointer mismatch", ptr);

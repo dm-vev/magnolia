@@ -7,4 +7,3 @@ magnolia_zig_add_obj_to_component(
     COMPONENT_LIB ${COMPONENT_LIB}
     SRC "${CMAKE_CURRENT_LIST_DIR}/zigtest.zig"
 )
-

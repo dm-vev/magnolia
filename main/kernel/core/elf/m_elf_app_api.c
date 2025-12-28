@@ -28,12 +28,13 @@ int m_meminfo(magnolia_meminfo_t *info)
 
     magnolia_meminfo_t out = {0};
     out.size = (uint32_t)sizeof(out);
-    out.version = 1;
+    out.version = 2;
 
     out.heap_total_bytes = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
     out.heap_free_bytes = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
     out.heap_min_free_bytes = heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);
-    out.heap_largest_free_block_bytes = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
+    /* Avoid walking the heap from applets; report unsupported for largest block. */
+    out.heap_largest_free_block_bytes = (size_t)-1;
 
 #if CONFIG_MAGNOLIA_ALLOC_ENABLED && CONFIG_MAGNOLIA_JOB_ENABLED
     job_ctx_t *ctx = jctx_current();
@@ -44,6 +45,7 @@ int m_meminfo(magnolia_meminfo_t *info)
         out.job_peak_bytes = stats.peak_bytes;
         out.job_capacity_bytes = stats.capacity_bytes;
         out.job_region_count = stats.region_count;
+        out.job_limit_bytes = m_alloc_get_job_heap_limit_bytes();
     }
 #endif
 
@@ -54,4 +56,3 @@ int m_meminfo(magnolia_meminfo_t *info)
     memcpy(info, &out, copy);
     return 0;
 }
-

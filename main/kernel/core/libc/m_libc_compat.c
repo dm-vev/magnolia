@@ -18,6 +18,7 @@
 
 #include "esp_rom_sys.h"
 #include "esp_rom_serial_output.h"
+#include "driver/usb_serial_jtag.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -395,6 +396,7 @@ static ssize_t libc_console_write(const void *buffer, size_t size)
     for (size_t i = 0; i < size; ++i) {
         esp_rom_output_putc((char)bytes[i]);
     }
+    esp_rom_output_flush_tx(CONFIG_ESP_CONSOLE_ROM_SERIAL_PORT_NUM);
     return (ssize_t)size;
 }
 
@@ -433,6 +435,11 @@ int m_libc_close(int fd)
 
 ssize_t m_libc_read(int fd, void *buffer, size_t size)
 {
+    if (fd >= 0 && fd <= 2) {
+        if (m_vfs_fd_lookup(libc_job_id(), fd) != NULL) {
+            goto vfs_read;
+        }
+    }
     if (fd == 0) {
         if (buffer == NULL) {
             libc_set_errno(EFAULT);
@@ -444,6 +451,24 @@ ssize_t m_libc_read(int fd, void *buffer, size_t size)
 
         uint8_t *out = (uint8_t *)buffer;
         size_t produced = 0;
+
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+        if (usb_serial_jtag_is_driver_installed()) {
+            while (produced == 0) {
+                int n = usb_serial_jtag_read_bytes(out, size, portMAX_DELAY);
+                if (n <= 0) {
+                    continue;
+                }
+                for (int i = 0; i < n; ++i) {
+                    if (out[i] == '\r') {
+                        out[i] = '\n';
+                    }
+                }
+                produced = (size_t)n;
+            }
+            return (ssize_t)produced;
+        }
+#endif
 
         uint8_t c = 0;
         while (esp_rom_output_rx_one_char(&c) != 0) {
@@ -472,6 +497,7 @@ ssize_t m_libc_read(int fd, void *buffer, size_t size)
         return -1;
     }
 
+vfs_read:
     size_t read_bytes = 0;
     m_vfs_error_t err = m_vfs_read(libc_job_id(), fd, buffer, size, &read_bytes);
     if (err != M_VFS_ERR_OK) {
@@ -484,7 +510,9 @@ ssize_t m_libc_read(int fd, void *buffer, size_t size)
 ssize_t m_libc_write(int fd, const void *buffer, size_t size)
 {
     if (fd == 1 || fd == 2) {
-        return libc_console_write(buffer, size);
+        if (m_vfs_fd_lookup(libc_job_id(), fd) == NULL) {
+            return libc_console_write(buffer, size);
+        }
     }
     if (fd == 0) {
         libc_set_errno(EBADF);
@@ -612,6 +640,7 @@ int m_libc_dup2(int oldfd, int newfd)
     }
     if (oldfd >= 0 && oldfd <= 2) {
         if (newfd == oldfd) {
+            m_vfs_fd_release(libc_job_id(), newfd);
             return newfd;
         }
         libc_set_errno(ENOTSUP);

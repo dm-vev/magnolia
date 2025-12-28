@@ -6,6 +6,8 @@ zighello
 rshello
 gohello
 rusthello
+edit
+medit
 rselftest
 goargs
 gotest

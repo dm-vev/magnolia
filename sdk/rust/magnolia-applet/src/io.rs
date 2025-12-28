@@ -4,6 +4,26 @@ use core::fmt::Write;
 use crate::errno::{Error, Result};
 use crate::sys;
 
+pub fn isatty(fd: i32) -> bool {
+    unsafe { sys::isatty(fd) == 1 }
+}
+
+pub fn dup(fd: i32) -> Result<i32> {
+    let out = unsafe { sys::dup(fd) };
+    if out < 0 {
+        return Err(Error::last());
+    }
+    Ok(out)
+}
+
+pub fn dup2(oldfd: i32, newfd: i32) -> Result<i32> {
+    let out = unsafe { sys::dup2(oldfd, newfd) };
+    if out < 0 {
+        return Err(Error::last());
+    }
+    Ok(out)
+}
+
 pub fn write_all(fd: i32, mut buf: &[u8]) -> Result<()> {
     while !buf.is_empty() {
         let n = unsafe { sys::write(fd, buf.as_ptr().cast(), buf.len()) };
@@ -14,6 +34,26 @@ pub fn write_all(fd: i32, mut buf: &[u8]) -> Result<()> {
             return Err(Error { errno: 5 }); // EIO
         }
         buf = &buf[n as usize..];
+    }
+    Ok(())
+}
+
+pub fn read(fd: i32, buf: &mut [u8]) -> Result<usize> {
+    let n = unsafe { sys::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
+    if n < 0 {
+        return Err(Error::last());
+    }
+    Ok(n as usize)
+}
+
+pub fn read_exact(fd: i32, mut buf: &mut [u8]) -> Result<()> {
+    while !buf.is_empty() {
+        let n = read(fd, buf)?;
+        if n == 0 {
+            return Err(Error { errno: 5 }); // EIO
+        }
+        let tmp = buf;
+        buf = &mut tmp[n..];
     }
     Ok(())
 }

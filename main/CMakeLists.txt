@@ -109,9 +109,20 @@ if(CONFIG_MAGNOLIA_VFS_ENABLED)
     if(CONFIG_MAGNOLIA_VFS_DEVFS)
         list(APPEND APP_SRCS
             "kernel/vfs/fs/devfs/devfs.c"
+            "kernel/vfs/fs/devfs/devfs_gpio.c"
             "kernel/vfs/fs/devfs/devfs_stream.c"
             "kernel/vfs/fs/devfs/devfs_stream_devices.c"
         )
+        if(CONFIG_MAGNOLIA_DEVFS_ALLOC)
+            list(APPEND APP_SRCS
+                "kernel/vfs/fs/devfs/devfs_alloc.c"
+            )
+        endif()
+        if(CONFIG_MAGNOLIA_DEVFS_FB)
+            list(APPEND APP_SRCS
+                "kernel/vfs/fs/devfs/devfs_fb.c"
+            )
+        endif()
         if(CONFIG_MAGNOLIA_DEVFS_SELFTESTS)
             list(APPEND APP_SRCS
                 "kernel/vfs/fs/devfs/devfs_tests.c"
@@ -224,6 +235,9 @@ idf_component_register(
         newlib
         esp_timer
         esp_partition
+        esp_psram
+        esp_driver_gpio
+        esp_driver_usb_serial_jtag
 )
 
 if(CONFIG_MAGNOLIA_ALLOC_ENABLED AND CONFIG_MAGNOLIA_ALLOC_WRAP_LIBC)

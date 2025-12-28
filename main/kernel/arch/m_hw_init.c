@@ -12,10 +12,15 @@
 #include "kernel/core/memory/m_alloc.h"
 #include "kernel/core/vfs/m_vfs.h"
 #include "kernel/vfs/fs/littlefs/littlefs_fs.h"
+#include "esp_attr.h"
+#include "esp_err.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "driver/usb_serial_jtag.h"
+#include "esp_heap_caps.h"
+#include "esp_psram.h"
 #if CONFIG_MAGNOLIA_VFS_DEVFS && CONFIG_MAGNOLIA_DEVFS_SELFTESTS
 #include "kernel/vfs/fs/devfs/devfs_tests.h"
 #endif
@@ -42,11 +47,13 @@ static const char *TAG = "m_hw_init";
 
 #if CONFIG_MAGNOLIA_ELF_ENABLED && CONFIG_MAGNOLIA_ELF_AUTOSTART_INIT
 static m_job_queue_t *s_init_queue;
+DRAM_ATTR static char s_init_path[] = CONFIG_MAGNOLIA_ELF_INIT_PATH;
 
 static m_job_handler_result_t magnolia_init_job(m_job_id_t job, void *data)
 {
-    const char *path = (const char *)data;
-    if (path == NULL) {
+    (void)data;
+    const char *path = s_init_path;
+    if (path == NULL || path[0] == '\0') {
         return (m_job_handler_result_t){
             .status = M_JOB_RESULT_ERROR,
             .payload = NULL,
@@ -90,8 +97,7 @@ static void magnolia_autostart_init(void)
         return;
     }
 
-    const char *init_path = CONFIG_MAGNOLIA_ELF_INIT_PATH;
-    m_job_error_t err = m_job_queue_submit(s_init_queue, magnolia_init_job, (void *)init_path);
+    m_job_error_t err = m_job_queue_submit(s_init_queue, magnolia_init_job, NULL);
     if (err != M_JOB_OK) {
         ESP_LOGE(TAG, "init submit failed err=%d", (int)err);
     }
@@ -122,6 +128,11 @@ static void magnolia_mount_rootfs(void)
 #endif
 
     (void)m_vfs_mount("/", "littlefs", &opts);
+
+#if CONFIG_MAGNOLIA_VFS_DEVFS
+    (void)m_vfs_mkdir(NULL, "/dev", M_VFS_DIRECTORY_MODE_DEFAULT);
+    (void)m_vfs_mount("/dev", "devfs", NULL);
+#endif
 }
 #endif
 
@@ -167,10 +178,31 @@ static void run_littlefs_selftests(void)
 
 void magnolia_hw_init(void)
 {
+    #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    if (!usb_serial_jtag_is_driver_installed()) {
+        usb_serial_jtag_driver_config_t cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+        esp_err_t err = usb_serial_jtag_driver_install(&cfg);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "usb_serial_jtag_driver_install failed: %s", esp_err_to_name(err));
+        }
+    }
+#endif
+
     m_alloc_init();
     m_timer_init();
     m_sched_init();
     ipc_init();
+
+#if CONFIG_SPIRAM
+    ESP_LOGI(TAG,
+             "psram init=%d size=%u exec_free=%u exec_largest=%u spiram_exec_free=%u spiram_exec_largest=%u",
+             esp_psram_is_initialized(),
+             (unsigned)esp_psram_get_size(),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_EXEC),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_EXEC),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_EXEC),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_EXEC));
+#endif
 
 #if CONFIG_MAGNOLIA_VFS_ENABLED && CONFIG_MAGNOLIA_LITTLEFS_ENABLED
     magnolia_mount_rootfs();

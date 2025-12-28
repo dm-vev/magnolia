@@ -26,11 +26,28 @@
 #include "kernel/core/vfs/m_vfs.h"
 #include "kernel/arch/m_arch.h"
 
+#include "esp_memory_utils.h"
 #define stype(_s, _t)               ((_s)->type == (_t))
 #define sflags(_s, _f)              (((_s)->flags & (_f)) == (_f))
 #define ADDR_OFFSET                 (0x400)
 
 static const char *TAG = "m_elf";
+
+static bool m_elf_path_is_safe(const char *path)
+{
+    return path &&
+           (esp_ptr_in_dram(path) || esp_ptr_external_ram(path) || esp_ptr_in_drom(path));
+}
+
+static bool m_elf_path_prefers_sections(const char *path)
+{
+    if (!path) {
+        return false;
+    }
+    const char *base = strrchr(path, '/');
+    base = base ? (base + 1) : path;
+    return strcmp(base, "edit") == 0 || strcmp(base, "medit") == 0;
+}
 
 static void m_elf_log_stack_watermark(const char *phase)
 {
@@ -216,6 +233,20 @@ static int m_elf_load_phdr_image(m_elf_t *elf, const uint8_t *pbuf, size_t len)
     uintptr_t lowest_vaddr = UINTPTR_MAX;
     uintptr_t lowest_addr = 0;
     uint32_t loaded = 0;
+    bool has_exec = false;
+
+    for (uint32_t i = 0; i < ehdr->phnum; ++i) {
+        if (phdr[i].type != PT_LOAD) {
+            continue;
+        }
+        bool exec = (phdr[i].flags & PF_X) != 0;
+        if (exec) {
+            has_exec = true;
+        }
+    }
+    if (!has_exec) {
+        return -ENOTSUP;
+    }
 
     for (uint32_t i = 0; i < ehdr->phnum; ++i) {
         if (phdr[i].type != PT_LOAD) {
@@ -285,42 +316,66 @@ static int m_elf_load_phdr_image(m_elf_t *elf, const uint8_t *pbuf, size_t len)
 }
 
 #if CONFIG_ELF_LOADER_BUS_ADDRESS_MIRROR
+typedef struct {
+    Elf32_Addr vaddr;
+    Elf32_Off  offset;
+    uint32_t   size;
+    bool       nobits;
+} m_elf_data_sec_t;
+
+#define ELF_DATA_SECS_MAX 32
+
 static int m_elf_load_section(m_elf_t *elf, const uint8_t *pbuf)
 {
-    uint32_t size;
-
     const elf32_hdr_t *ehdr = (const elf32_hdr_t *)pbuf;
     const elf32_shdr_t *shdr = (const elf32_shdr_t *)(pbuf + ehdr->shoff);
     const char *shstrab = (const char *)pbuf + shdr[ehdr->shstrndx].offset;
+    uint32_t shstr_size = shdr[ehdr->shstrndx].size;
+    m_elf_data_sec_t data_secs[ELF_DATA_SECS_MAX];
+    uint32_t data_count = 0;
+    uint32_t data_total = 0;
+
+    memset(elf->sec, 0, sizeof(elf->sec));
 
     for (uint32_t i = 0; i < ehdr->shnum; i++) {
+        if (shdr[i].name >= shstr_size) {
+            continue;
+        }
         const char *name = shstrab + shdr[i].name;
 
-        if (stype(&shdr[i], SHT_PROGBITS) && sflags(&shdr[i], SHF_ALLOC)) {
-            if (sflags(&shdr[i], SHF_EXECINSTR) && !strcmp(ELF_TEXT, name)) {
+        if (stype(&shdr[i], SHT_PROGBITS) && sflags(&shdr[i], SHF_ALLOC) &&
+            sflags(&shdr[i], SHF_EXECINSTR) && !strcmp(ELF_TEXT, name)) {
+            if (elf->sec[ELF_SEC_TEXT].size == 0) {
                 elf->sec[ELF_SEC_TEXT].v_addr  = shdr[i].addr;
                 elf->sec[ELF_SEC_TEXT].size    = ELF_ALIGN(shdr[i].size, 4);
                 elf->sec[ELF_SEC_TEXT].offset  = shdr[i].offset;
-            } else if (sflags(&shdr[i], SHF_WRITE) && !strcmp(ELF_DATA, name)) {
-                elf->sec[ELF_SEC_DATA].v_addr  = shdr[i].addr;
-                elf->sec[ELF_SEC_DATA].size    = shdr[i].size;
-                elf->sec[ELF_SEC_DATA].offset  = shdr[i].offset;
-            } else if (!strcmp(ELF_RODATA, name)) {
-                elf->sec[ELF_SEC_RODATA].v_addr  = shdr[i].addr;
-                elf->sec[ELF_SEC_RODATA].size    = shdr[i].size;
-                elf->sec[ELF_SEC_RODATA].offset  = shdr[i].offset;
-            } else if (!strcmp(ELF_DATA_REL_RO, name)) {
-                elf->sec[ELF_SEC_DRLRO].v_addr  = shdr[i].addr;
-                elf->sec[ELF_SEC_DRLRO].size    = shdr[i].size;
-                elf->sec[ELF_SEC_DRLRO].offset  = shdr[i].offset;
             }
-        } else if (stype(&shdr[i], SHT_NOBITS) &&
-                   sflags(&shdr[i], SHF_ALLOC | SHF_WRITE) &&
-                   !strcmp(ELF_BSS, name)) {
-            elf->sec[ELF_SEC_BSS].v_addr  = shdr[i].addr;
-            elf->sec[ELF_SEC_BSS].size    = shdr[i].size;
-            elf->sec[ELF_SEC_BSS].offset  = shdr[i].offset;
+            continue;
         }
+
+        if (!sflags(&shdr[i], SHF_ALLOC) || sflags(&shdr[i], SHF_EXECINSTR)) {
+            continue;
+        }
+        if (!stype(&shdr[i], SHT_PROGBITS) && !stype(&shdr[i], SHT_NOBITS)) {
+            continue;
+        }
+        if (shdr[i].size == 0) {
+            continue;
+        }
+        if (data_count >= ELF_DATA_SECS_MAX) {
+            return -ENOMEM;
+        }
+        data_secs[data_count].vaddr = shdr[i].addr;
+        data_secs[data_count].offset = shdr[i].offset;
+        data_secs[data_count].size = shdr[i].size;
+        data_secs[data_count].nobits = stype(&shdr[i], SHT_NOBITS);
+        data_total += ELF_ALIGN(shdr[i].size, 4);
+        if (stype(&shdr[i], SHT_NOBITS) && !strcmp(ELF_BSS, name)) {
+            elf->sec[ELF_SEC_BSS].v_addr = shdr[i].addr;
+            elf->sec[ELF_SEC_BSS].size = shdr[i].size;
+            elf->sec[ELF_SEC_BSS].offset = shdr[i].offset;
+        }
+        data_count++;
     }
 
     if (!elf->sec[ELF_SEC_TEXT].size) {
@@ -329,6 +384,7 @@ static int m_elf_load_section(m_elf_t *elf, const uint8_t *pbuf)
 
     elf->ptext = m_elf_malloc(elf, elf->sec[ELF_SEC_TEXT].size, true);
     if (!elf->ptext) {
+        ESP_LOGE(TAG, "ELF text alloc failed (size=0x%x)", (unsigned)elf->sec[ELF_SEC_TEXT].size);
         return -ENOMEM;
     }
     if (m_elf_track_alloc(elf, elf->ptext) != 0) {
@@ -337,13 +393,10 @@ static int m_elf_load_section(m_elf_t *elf, const uint8_t *pbuf)
         return -ENOMEM;
     }
 
-    size = ELF_ALIGN(elf->sec[ELF_SEC_DATA].size, 4) +
-           ELF_ALIGN(elf->sec[ELF_SEC_RODATA].size, 4) +
-           ELF_ALIGN(elf->sec[ELF_SEC_DRLRO].size, 4) +
-           ELF_ALIGN(elf->sec[ELF_SEC_BSS].size, 4);
-    if (size) {
-        elf->pdata = m_elf_malloc(elf, size, false);
+    if (data_total) {
+        elf->pdata = m_elf_malloc(elf, data_total, false);
         if (!elf->pdata) {
+            ESP_LOGE(TAG, "ELF data alloc failed (size=0x%x)", (unsigned)data_total);
             m_elf_cleanup_loaded(elf);
             return -ENOMEM;
         }
@@ -354,7 +407,7 @@ static int m_elf_load_section(m_elf_t *elf, const uint8_t *pbuf)
     }
 
     ESP_LOGI(TAG, "ELF load OK");
-    ESP_LOGI(TAG, "ELF image size=0x%x", (unsigned)(elf->sec[ELF_SEC_TEXT].size + size));
+    ESP_LOGI(TAG, "ELF image size=0x%x", (unsigned)(elf->sec[ELF_SEC_TEXT].size + data_total));
 
     elf->sec[ELF_SEC_TEXT].addr = (Elf32_Addr)elf->ptext;
     memcpy(elf->ptext, pbuf + elf->sec[ELF_SEC_TEXT].offset,
@@ -364,49 +417,21 @@ static int m_elf_load_section(m_elf_t *elf, const uint8_t *pbuf)
                           elf->sec[ELF_SEC_TEXT].addr,
                           elf->sec[ELF_SEC_TEXT].size);
 
-    if (size) {
+    if (data_total) {
         uint8_t *pdata = elf->pdata;
 
-        if (elf->sec[ELF_SEC_DATA].size) {
-            elf->sec[ELF_SEC_DATA].addr = (uint32_t)pdata;
-            memcpy(pdata, pbuf + elf->sec[ELF_SEC_DATA].offset,
-                   elf->sec[ELF_SEC_DATA].size);
+        for (uint32_t i = 0; i < data_count; ++i) {
+            uint32_t sec_size = data_secs[i].size;
+            if (!data_secs[i].nobits) {
+                memcpy(pdata, pbuf + data_secs[i].offset, sec_size);
+            } else {
+                memset(pdata, 0, sec_size);
+            }
             (void)m_elf_track_map(elf,
-                                  elf->sec[ELF_SEC_DATA].v_addr,
-                                  elf->sec[ELF_SEC_DATA].addr,
-                                  elf->sec[ELF_SEC_DATA].size);
-            pdata += ELF_ALIGN(elf->sec[ELF_SEC_DATA].size, 4);
-        }
-
-        if (elf->sec[ELF_SEC_RODATA].size) {
-            elf->sec[ELF_SEC_RODATA].addr = (uint32_t)pdata;
-            memcpy(pdata, pbuf + elf->sec[ELF_SEC_RODATA].offset,
-                   elf->sec[ELF_SEC_RODATA].size);
-            (void)m_elf_track_map(elf,
-                                  elf->sec[ELF_SEC_RODATA].v_addr,
-                                  elf->sec[ELF_SEC_RODATA].addr,
-                                  elf->sec[ELF_SEC_RODATA].size);
-            pdata += ELF_ALIGN(elf->sec[ELF_SEC_RODATA].size, 4);
-        }
-
-        if (elf->sec[ELF_SEC_DRLRO].size) {
-            elf->sec[ELF_SEC_DRLRO].addr = (uint32_t)pdata;
-            memcpy(pdata, pbuf + elf->sec[ELF_SEC_DRLRO].offset,
-                   elf->sec[ELF_SEC_DRLRO].size);
-            (void)m_elf_track_map(elf,
-                                  elf->sec[ELF_SEC_DRLRO].v_addr,
-                                  elf->sec[ELF_SEC_DRLRO].addr,
-                                  elf->sec[ELF_SEC_DRLRO].size);
-            pdata += ELF_ALIGN(elf->sec[ELF_SEC_DRLRO].size, 4);
-        }
-
-        if (elf->sec[ELF_SEC_BSS].size) {
-            elf->sec[ELF_SEC_BSS].addr = (uint32_t)pdata;
-            memset(pdata, 0, elf->sec[ELF_SEC_BSS].size);
-            (void)m_elf_track_map(elf,
-                                  elf->sec[ELF_SEC_BSS].v_addr,
-                                  elf->sec[ELF_SEC_BSS].addr,
-                                  elf->sec[ELF_SEC_BSS].size);
+                                  data_secs[i].vaddr,
+                                  (uintptr_t)pdata,
+                                  sec_size);
+            pdata += ELF_ALIGN(sec_size, 4);
         }
     }
 
@@ -420,7 +445,9 @@ static int m_elf_load_section(m_elf_t *elf, const uint8_t *pbuf)
 
     return 0;
 }
-#else
+
+#endif
+
 static int m_elf_load_segment(m_elf_t *elf, const uint8_t *pbuf)
 {
     uint32_t size;
@@ -518,7 +545,6 @@ static int m_elf_load_segment(m_elf_t *elf, const uint8_t *pbuf)
     elf->entry = (void *)m_elf_map_vaddr(elf, ehdr->entry);
     return 0;
 }
-#endif
 
 int m_elf_init(m_elf_t *elf, job_ctx_t *ctx)
 {
@@ -557,14 +583,28 @@ int m_elf_relocate(m_elf_t *elf, const uint8_t *pbuf, size_t len)
     shstrab = (const char *)pbuf + shdr[ehdr->shstrndx].offset;
     uint32_t shstr_size = shdr[ehdr->shstrndx].size;
 
-    /* Prefer program-header based loading (covers GOT/init_array/etc). */
-    ret = m_elf_load_phdr_image(elf, pbuf, len);
-    if (ret == -ENOTSUP) {
+    bool prefer_sections =
 #if CONFIG_ELF_LOADER_BUS_ADDRESS_MIRROR
-        ret = m_elf_load_section(elf, pbuf);
+            true;
 #else
-        ret = m_elf_load_segment(elf, pbuf);
+            elf->prefer_section != 0;
 #endif
+
+    if (prefer_sections) {
+        /* Prefer section-based loading to keep non-exec data in byte-accessible RAM. */
+        ret = m_elf_load_section(elf, pbuf);
+        if (ret != 0) {
+            ret = m_elf_load_phdr_image(elf, pbuf, len);
+            if (ret == -ENOTSUP) {
+                ret = m_elf_load_segment(elf, pbuf);
+            }
+        }
+    } else {
+        /* Prefer program-header based loading (covers GOT/init_array/etc). */
+        ret = m_elf_load_phdr_image(elf, pbuf, len);
+        if (ret == -ENOTSUP) {
+            ret = m_elf_load_segment(elf, pbuf);
+        }
     }
     if (ret) {
         ESP_LOGE(TAG, "Error to load ELF, ret=%d", ret);
@@ -757,7 +797,8 @@ void m_elf_deinit(m_elf_t *elf)
     m_elf_cleanup_loaded(elf);
 }
 
-int m_elf_run_buffer(const uint8_t *pbuf, size_t len, int argc, char *argv[], int *out_rc)
+static int m_elf_run_buffer_ex(const uint8_t *pbuf, size_t len, int argc, char *argv[],
+                               int *out_rc, bool prefer_section)
 {
     job_ctx_t *ctx = jctx_current();
     m_elf_t *elf = (m_elf_t *)m_job_alloc(ctx, sizeof(*elf));
@@ -770,6 +811,7 @@ int m_elf_run_buffer(const uint8_t *pbuf, size_t len, int argc, char *argv[], in
         m_job_free(ctx, elf);
         return ret;
     }
+    elf->prefer_section = prefer_section ? 1 : 0;
     ret = m_elf_relocate(elf, pbuf, len);
     if (ret < 0) {
         m_elf_deinit(elf);
@@ -785,16 +827,29 @@ int m_elf_run_buffer(const uint8_t *pbuf, size_t len, int argc, char *argv[], in
     return 0;
 }
 
+int m_elf_run_buffer(const uint8_t *pbuf, size_t len, int argc, char *argv[], int *out_rc)
+{
+    return m_elf_run_buffer_ex(pbuf, len, argc, argv, out_rc, false);
+}
+
 int m_elf_run_file(const char *path, int argc, char *argv[], int *out_rc)
 {
     if (!path) {
+        return -EINVAL;
+    }
+    if (!m_elf_path_is_safe(path)) {
+        ESP_LOGE(TAG, "VFS open invalid path ptr=%p", path);
         return -EINVAL;
     }
 
     int fd = -1;
     m_vfs_error_t verr = m_vfs_open(jctx_current_job_id(), path, 0, &fd);
     if (verr != M_VFS_ERR_OK) {
-        ESP_LOGE(TAG, "VFS open %s failed err=%d", path, verr);
+        if (m_elf_path_is_safe(path)) {
+            ESP_LOGE(TAG, "VFS open %s failed err=%d", path, verr);
+        } else {
+            ESP_LOGE(TAG, "VFS open failed err=%d path_ptr=%p", verr, path);
+        }
         return -ENOENT;
     }
 
@@ -851,7 +906,8 @@ int m_elf_run_file(const char *path, int argc, char *argv[], int *out_rc)
 
     ESP_LOGI(TAG, "ELF %s read from VFS size=%u", path, (unsigned)total);
     int rc = 0;
-    int ret = m_elf_run_buffer(buffer, total, argc, argv, &rc);
+    bool prefer_section = m_elf_path_prefers_sections(path);
+    int ret = m_elf_run_buffer_ex(buffer, total, argc, argv, &rc, prefer_section);
     heap_caps_free(buffer);
     if (ret < 0) {
         return ret;

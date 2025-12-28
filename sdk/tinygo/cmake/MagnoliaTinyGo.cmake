@@ -138,6 +138,11 @@ function(magnolia_tinygo_add_object)
             set(objcopy_cmd
                 COMMAND ${objcopy_bin}
                         --set-section-flags .literal=alloc,contents,code,data
+                        # TinyGo Xtensa emits relocations in `.rodata` (type metadata, itabs, etc).
+                        # When linking the final applet as `-shared`, GNU ld treats these as
+                        # "dangerous relocation: dynamic relocation in read-only section".
+                        # Renaming the section ensures it is linked into a writable segment.
+                        --rename-section .rodata=.data,alloc,load,data,contents
                         ${out_obj}
             )
         else()

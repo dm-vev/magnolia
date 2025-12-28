@@ -1,5 +1,20 @@
 menu "DevFS streaming devices"
 
+config MAGNOLIA_DEVFS_GPIO
+    bool "Enable DevFS GPIO device"
+    default y
+    depends on MAGNOLIA_VFS_DEVFS
+    help
+        Build /dev/gpio device node for GPIO control and edge events.
+
+config MAGNOLIA_DEVFS_GPIO_EVENT_QUEUE_LEN
+    int "GPIO event queue length"
+    range 8 256
+    default 32
+    depends on MAGNOLIA_DEVFS_GPIO
+    help
+        Maximum number of queued GPIO edge events.
+
 config MAGNOLIA_DEVFS_PIPES
     bool "Enable DevFS pipe devices"
     default y
@@ -79,5 +94,148 @@ config MAGNOLIA_DEVFS_SHM_BUFFER_SIZE
     depends on MAGNOLIA_VFS_DEVFS
     help
         Size of the shared ring buffer used by pipes, TTY, and PTY devices.
+
+menu "Allocator devices"
+
+config MAGNOLIA_DEVFS_ALLOC
+    bool "Enable DevFS allocator control"
+    default y
+    depends on MAGNOLIA_VFS_DEVFS && MAGNOLIA_ALLOC_ENABLED
+    help
+        Build /dev/alloc for runtime job heap limit control.
+
+endmenu
+
+menu "Framebuffer devices"
+
+config MAGNOLIA_DEVFS_FB
+    bool "Enable DevFS framebuffer device"
+    default n
+    depends on MAGNOLIA_VFS_DEVFS
+    help
+        Build /dev/fb0 device node for RGB565 framebuffer output.
+
+choice MAGNOLIA_FB_BACKEND
+    prompt "Framebuffer backend"
+    default MAGNOLIA_FB_BACKEND_SPI_ST7786
+    depends on MAGNOLIA_DEVFS_FB
+
+config MAGNOLIA_FB_BACKEND_QEMU
+    bool "QEMU RGB panel"
+
+config MAGNOLIA_FB_BACKEND_SPI_ST7786
+    bool "SPI ST7786 panel (RGB565)"
+
+endchoice
+
+config MAGNOLIA_FB_WIDTH
+    int "Framebuffer width"
+    range 1 2048
+    default 320
+    depends on MAGNOLIA_DEVFS_FB
+
+config MAGNOLIA_FB_HEIGHT
+    int "Framebuffer height"
+    range 1 2048
+    default 240
+    depends on MAGNOLIA_DEVFS_FB
+
+config MAGNOLIA_FB_BGR
+    bool "Use BGR color order"
+    default n
+    depends on MAGNOLIA_DEVFS_FB
+
+config MAGNOLIA_FB_INVERT_COLOR
+    bool "Invert panel colors"
+    default n
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+config MAGNOLIA_FB_SWAP_XY
+    bool "Swap X and Y axes"
+    default n
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+config MAGNOLIA_FB_MIRROR_X
+    bool "Mirror X axis"
+    default n
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+config MAGNOLIA_FB_MIRROR_Y
+    bool "Mirror Y axis"
+    default n
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+config MAGNOLIA_FB_X_OFFSET
+    int "X offset"
+    range -255 255
+    default 0
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+config MAGNOLIA_FB_Y_OFFSET
+    int "Y offset"
+    range -255 255
+    default 0
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+config MAGNOLIA_FB_RESET_ACTIVE_HIGH
+    bool "Reset pin active high"
+    default n
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+config MAGNOLIA_FB_SPI_HOST
+    int "SPI host (2 or 3)"
+    range 2 3
+    default 2
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+config MAGNOLIA_FB_SPI_PCLK_HZ
+    int "SPI pixel clock (Hz)"
+    range 1000000 80000000
+    default 40000000
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+config MAGNOLIA_FB_SPI_QUEUE_DEPTH
+    int "SPI transaction queue depth"
+    range 1 16
+    default 10
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+config MAGNOLIA_FB_SPI_MOSI
+    int "SPI MOSI GPIO"
+    range -1 48
+    default -1
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+config MAGNOLIA_FB_SPI_SCLK
+    int "SPI SCLK GPIO"
+    range -1 48
+    default -1
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+config MAGNOLIA_FB_SPI_CS
+    int "SPI CS GPIO"
+    range -1 48
+    default -1
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+config MAGNOLIA_FB_SPI_DC
+    int "SPI DC GPIO"
+    range -1 48
+    default -1
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+config MAGNOLIA_FB_SPI_RST
+    int "SPI reset GPIO"
+    range -1 48
+    default -1
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+config MAGNOLIA_FB_BACKLIGHT_GPIO
+    int "Backlight GPIO"
+    range -1 48
+    default -1
+    depends on MAGNOLIA_FB_BACKEND_SPI_ST7786
+
+endmenu
 
 endmenu
