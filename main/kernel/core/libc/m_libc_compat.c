@@ -551,6 +551,39 @@ static size_t libc_file_get_offset(m_vfs_file_t *file)
     return offset;
 }
 
+int m_libc_ftruncate(int fd, off_t length)
+{
+    if (length < 0) {
+        libc_set_errno(EINVAL);
+        return -1;
+    }
+
+    m_vfs_file_t *file = m_vfs_fd_lookup(libc_job_id(), fd);
+    if (file == NULL || file->node == NULL || file->node->fs_type == NULL ||
+            file->node->fs_type->ops == NULL) {
+        libc_set_errno(EBADF);
+        return -1;
+    }
+    if (file->node->fs_type->ops->setattr == NULL) {
+        libc_set_errno(ENOSYS);
+        return -1;
+    }
+
+    m_vfs_stat_t st = {0};
+    st.size = (size_t)length;
+    m_vfs_error_t err = file->node->fs_type->ops->setattr(file->node, &st);
+    if (err != M_VFS_ERR_OK) {
+        libc_set_errno(libc_errno_from_vfs_error(err));
+        return -1;
+    }
+
+    size_t offset = libc_file_get_offset(file);
+    if (offset > (size_t)length) {
+        m_vfs_file_set_offset(file, (size_t)length);
+    }
+    return 0;
+}
+
 off_t m_libc_lseek(int fd, off_t offset, int whence)
 {
     if (fd >= 0 && fd <= 2) {

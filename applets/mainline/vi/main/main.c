@@ -878,6 +878,12 @@ int vi_main(int argc, char **argv)
     int c;
 
     INIT_G();
+#if defined(ESP_PLATFORM) || defined(__XTENSA__) || defined(__riscv)
+    /* Applets share stdio; avoid full buffering to prevent shell output stalls. */
+    setvbuf(stdout, NULL, _IONBF, 0);
+#else
+    setvbuf(stdout, NULL, _IOFBF, 1024);
+#endif
     rows = 24;
     columns = 80;
 #if !ENABLE_FEATURE_VI_WIN_RESIZE
@@ -1253,6 +1259,7 @@ static void colon(char *buf)
     char *fn, cmd[MAX_INPUT_LEN], args[MAX_INPUT_LEN];
     int i, l, li, ch, b, e;
     int useforce, forced = FALSE;
+    int cmd_quit = FALSE;
 
     // :3154	// if (-e line 3154) goto it  else stay put
     // :4,33w! foo	// write a portion of buffer to file "foo"
@@ -1322,6 +1329,16 @@ static void colon(char *buf)
         li = e - b + 1;
     }
     // ------------ now look for the command ------------
+    if (!args[0]) {
+        if ((cmd[0] == 'w' || cmd[0] == 'W') &&
+            (cmd[1] == 'q' || cmd[1] == 'Q' || cmd[1] == 'n' || cmd[1] == 'N') && cmd[2]) {
+            strcpy(args, cmd + 2);
+            cmd[2] = '\0';
+        } else if ((cmd[0] == 'x' || cmd[0] == 'X') && cmd[1]) {
+            strcpy(args, cmd + 1);
+            cmd[1] = '\0';
+        }
+    }
     i = strlen(cmd);
     if (i == 0) { // :123CR goto line #123
         if (b >= 0) {
@@ -1446,9 +1463,10 @@ static void colon(char *buf)
     } else if (strncasecmp(cmd, "quit", i) == 0    // Quit
                || strncasecmp(cmd, "next", i) == 0 // edit next file
     ) {
+        cmd_quit = (*cmd == 'q');
         if (useforce) {
             // force end of argv list
-            if (*cmd == 'q') {
+            if (cmd_quit) {
                 optind = save_argc;
             }
             editing = 0;
@@ -1456,12 +1474,29 @@ static void colon(char *buf)
         }
         // don't exit if the file been modified
         if (file_modified) {
-            status_line_bold("No write since last change (:%s! overrides)",
-                             (*cmd == 'q' ? "quit" : "next"));
-            goto vc1;
+            if (cmd_quit && current_filename && current_filename[0]) {
+#if ENABLE_FEATURE_VI_READONLY
+                if (readonly_mode) {
+                    status_line_bold("\"%s\" File is read only", current_filename);
+                    goto vc1;
+                }
+#endif
+                l = file_write(current_filename, text, end - 1);
+                if (l < 0) {
+                    if (l == -1)
+                        status_line_bold("\"%s\" %s", current_filename, strerror(errno));
+                    goto vc1;
+                }
+                file_modified = 0;
+                last_file_modified = -1;
+            } else {
+                status_line_bold("No write since last change (:%s! overrides)",
+                                 (cmd_quit ? "quit" : "next"));
+                goto vc1;
+            }
         }
         // are there other file to edit
-        if (*cmd == 'q' && optind < save_argc - 1) {
+        if (cmd_quit && optind < save_argc - 1) {
             status_line_bold("%d more file to edit", (save_argc - optind - 1));
             goto vc1;
         }
@@ -1639,6 +1674,10 @@ static void colon(char *buf)
             if (q == text && r == end - 1 && l == ch) {
                 file_modified = 0;
                 last_file_modified = -1;
+                if (args[0]) {
+                    free(current_filename);
+                    current_filename = xstrdup(fn);
+                }
             }
             if ((cmd[0] == 'x' || cmd[1] == 'q' || cmd[1] == 'n' || cmd[0] == 'X' ||
                  cmd[1] == 'Q' || cmd[1] == 'N') &&
@@ -2695,10 +2734,12 @@ static void catch_sig(int sig)
 //
 static int awaitInput(int tics)
 {
-    fflush(stdout);
+    if (tics > 0) {
+        fflush(stdout);
 #ifdef TERMIOS
-    tcdrain(STDOUT_FILENO);
+        tcdrain(STDOUT_FILENO);
 #endif
+    }
 #if 0
     struct pollfd pfd[1];
     pfd[0].fd = 0;

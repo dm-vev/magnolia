@@ -44,6 +44,7 @@ int m_libc_open(const char *path, int flags, ...);
 int m_libc_close(int fd);
 ssize_t m_libc_read(int fd, void *buffer, size_t size);
 ssize_t m_libc_write(int fd, const void *buffer, size_t size);
+int m_libc_ftruncate(int fd, off_t length);
 off_t m_libc_lseek(int fd, off_t offset, int whence);
 int m_libc_ioctl(int fd, unsigned long request, ...);
 int m_libc_dup(int oldfd);

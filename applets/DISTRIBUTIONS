@@ -9,6 +9,7 @@
 [mainline]
 mainline/build_elf_file_example
 mainline/cat
+mainline/clear
 mainline/cd
 mainline/chmod
 mainline/chown
@@ -55,6 +56,7 @@ mainline/xxd
 [experimental-rust]
 mainline/build_elf_file_example
 mainline/cat
+mainline/clear
 mainline/cd
 mainline/chmod
 mainline/chown
@@ -94,6 +96,7 @@ mainline/true
 mainline/uname
 mainline/user
 mainline/vi
+rust/rclear -> clear
 rust/edit
 rust/rdd -> dd
 rust/rhexdump -> hexdump
@@ -105,6 +108,7 @@ rust/rxxd -> xxd
 [experimental-zig]
 mainline/build_elf_file_example
 mainline/cat
+mainline/clear
 mainline/cd
 mainline/chmod
 mainline/chown
@@ -144,6 +148,7 @@ mainline/true
 mainline/uname
 mainline/user
 mainline/vi
+zig/zclear -> clear
 zig/zdd -> dd
 zig/zhexdump -> hexdump
 zig/zigdemo
@@ -154,6 +159,7 @@ zig/zxxd -> xxd
 [experimental-go]
 mainline/build_elf_file_example
 mainline/cat
+mainline/clear
 mainline/cd
 mainline/chmod
 mainline/chown
@@ -187,6 +193,7 @@ mainline/touch
 mainline/tr
 mainline/user
 mainline/vi
+go/goclear -> clear
 go/echo -> echo
 go/false -> false
 go/goargs

@@ -52,6 +52,7 @@ tee
 zigdemo
 zighello
 zigtest
+zclear
 
 [go]
 echo
