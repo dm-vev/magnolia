@@ -18,6 +18,9 @@ extern char *getcwd(char *buf, size_t size);
 
 extern int *__errno(void);
 extern char *strerror(int errnum);
+
+extern unsigned int sleep(unsigned int seconds);
+extern int usleep(unsigned int usec);
 */
 import "C"
 
@@ -165,8 +168,20 @@ func Getcwd(buf []byte) (string, error) {
 }
 
 func Cwd() (string, error) {
-	var scratch [256]byte
-	return Getcwd(scratch[:])
+    var scratch [256]byte
+    return Getcwd(scratch[:])
+}
+
+func Sleep(seconds uint32) uint32 {
+	return uint32(C.sleep(C.uint(seconds)))
+}
+
+func Usleep(usec uint32) error {
+	rc := C.usleep(C.uint(usec))
+	if rc != 0 {
+		return errno()
+	}
+	return nil
 }
 
 func Args(argc int32, argv unsafe.Pointer) []string {

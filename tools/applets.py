@@ -3,13 +3,14 @@
 Build Magnolia ELF applets and pack them into LittleFS image for vfs partition.
 
 Usage:
-  python tools/applets.py build [applet...]
-  python tools/applets.py build --only applet[,applet...]
+  python tools/applets.py build [--dist NAME] [applet...]
+  python tools/applets.py build [--dist NAME] --only applet[,applet...]
   python tools/applets.py flash [--port PORT] [--baud BAUD]  (optional, best-effort)
   python tools/applets.py qemu-image   (merge qemu_flash.bin with vfs.bin)
   python tools/applets.py qemu-inject  (patch build/qemu_flash.bin in-place)
 
 Requires ESP-IDF environment for building applets (idf.py in PATH, IDF_PATH set).
+Use MAGNOLIA_DIST or MAGNOLIA_DISTRIBUTION to select a default distribution.
 """
 
 from __future__ import annotations
@@ -33,6 +34,8 @@ IMAGE_PATH = BUILD_DIR / "vfs.bin"
 QEMU_FLASH_PATH = BUILD_DIR / "qemu_flash.bin"
 QEMU_EFUSE_PATH = BUILD_DIR / "qemu_efuse.bin"
 ELF_TARGETS_FILE = APPLETS_DIR / "ELF_TARGETS.txt"
+CONFIGURE_FILE = APPLETS_DIR / "CONFIGURE"
+DISTRIBUTIONS_FILE = APPLETS_DIR / "DISTRIBUTIONS"
 MKIMAGE_SRC = ROOT / "cmake" / "littlefs_mkimage.c"
 MKIMAGE_BIN = BUILD_DIR / "littlefs_mkimage"
 
@@ -93,6 +96,129 @@ def parse_partition_size() -> int:
     return 0x80000
 
 
+def load_configure_specs() -> list[tuple[str, str, Path]]:
+    if not CONFIGURE_FILE.exists():
+        return []
+    specs: list[tuple[str, str, Path]] = []
+    section: str | None = None
+    for raw in CONFIGURE_FILE.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip()
+            continue
+        if section is None:
+            continue
+        name = line.split("#", 1)[0].strip()
+        if not name:
+            continue
+        specs.append((section, name, APPLETS_DIR / section / name))
+    return specs
+
+
+def load_distribution_specs() -> dict[str, list[tuple[str, str, Path, str | None]]]:
+    if not DISTRIBUTIONS_FILE.exists():
+        return {}
+    specs: dict[str, list[tuple[str, str, Path, str | None]]] = {}
+    section: str | None = None
+    for raw in DISTRIBUTIONS_FILE.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip()
+            continue
+        if section is None:
+            continue
+        entry = line.split("#", 1)[0].strip()
+        if not entry:
+            continue
+        output_name: str | None = None
+        if "->" in entry:
+            left, right = entry.split("->", 1)
+            entry = left.strip()
+            output_name = right.strip()
+        elif " as " in entry:
+            left, right = entry.split(" as ", 1)
+            entry = left.strip()
+            output_name = right.strip()
+        if not entry or "/" not in entry:
+            log(f"Skipping invalid distribution entry in {DISTRIBUTIONS_FILE}: {line}")
+            continue
+        dist_section, name = entry.split("/", 1)
+        path = APPLETS_DIR / dist_section / name
+        if output_name == "":
+            output_name = None
+        specs.setdefault(section, []).append((dist_section, name, path, output_name))
+    return specs
+
+
+def parse_distribution(args: list[str]) -> tuple[str | None, list[str]]:
+    dist = os.environ.get("MAGNOLIA_DIST") or os.environ.get("MAGNOLIA_DISTRIBUTION")
+    filtered: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ("--dist", "--distribution"):
+            if i + 1 < len(args):
+                dist = args[i + 1]
+                i += 2
+                continue
+            i += 1
+            continue
+        if arg.startswith("--dist=") or arg.startswith("--distribution="):
+            dist = arg.split("=", 1)[1]
+            i += 1
+            continue
+        filtered.append(arg)
+        i += 1
+    return dist, filtered
+
+
+def resolve_distribution(dist_name: str, targets: list[str] | None = None) -> list[tuple[Path, str | None]]:
+    distributions = load_distribution_specs()
+    if not distributions:
+        raise SystemExit(f"No distributions defined in {DISTRIBUTIONS_FILE}")
+    entries = distributions.get(dist_name)
+    if entries is None:
+        known = ", ".join(sorted(distributions))
+        raise SystemExit(f"Unknown distribution '{dist_name}'. Available: {known}")
+    if not targets:
+        return [(path, output) for _section, _name, path, output in entries]
+
+    by_ref: dict[str, tuple[Path, str | None]] = {}
+    by_name: dict[str, list[tuple[Path, str | None]]] = {}
+    by_output: dict[str, list[tuple[Path, str | None]]] = {}
+    for section, name, path, output in entries:
+        entry = (path, output)
+        by_ref[f"{section}/{name}"] = entry
+        by_name.setdefault(name, []).append(entry)
+        out_name = output or get_applet_output_name(path)
+        by_output.setdefault(out_name, []).append(entry)
+
+    result: list[tuple[Path, str | None]] = []
+    for target in targets:
+        if "/" in target:
+            entry = by_ref.get(target)
+            if entry is None:
+                log(f"Skipping missing distribution applet: {target}")
+                continue
+            result.append(entry)
+            continue
+        candidates = by_name.get(target, [])
+        if not candidates:
+            candidates = by_output.get(target, [])
+        if not candidates:
+            log(f"Skipping missing distribution applet: {target}")
+            continue
+        if len(candidates) > 1:
+            names = ", ".join(str(p[0]) for p in candidates)
+            raise SystemExit(f"Ambiguous applet '{target}' matches: {names}")
+        result.append(candidates[0])
+    return result
+
+
 def discover_applets() -> list[Path]:
     def load_from_file() -> list[Path]:
         if not ELF_TARGETS_FILE.exists():
@@ -124,6 +250,10 @@ def discover_applets() -> list[Path]:
             dirs.append(d)
         return dirs
 
+    configured = load_configure_specs()
+    if configured:
+        return [spec[2] for spec in configured]
+
     explicit = load_from_file()
     implicit = detect_project_elf_dirs()
     seen: set[Path] = set()
@@ -136,7 +266,18 @@ def discover_applets() -> list[Path]:
     return result
 
 
-def find_output_elf(applet_dir: Path) -> Path:
+def get_applet_output_name(applet_dir: Path) -> str:
+    name_file = applet_dir / "APPLET_NAME"
+    if name_file.exists():
+        for raw in name_file.read_text().splitlines():
+            name = raw.strip()
+            if not name or name.startswith("#"):
+                continue
+            return name
+    return applet_dir.name
+
+
+def find_output_elf(applet_dir: Path, preferred_name: str | None = None) -> Path:
     build_dir = applet_dir / "build"
     if not build_dir.exists():
         raise FileNotFoundError(f"{applet_dir} build dir missing")
@@ -150,7 +291,7 @@ def find_output_elf(applet_dir: Path) -> Path:
         elfs = [p for p in build_dir.rglob("*.elf") if "bootloader" not in p.name and "partition" not in p.name]
     if not elfs:
         raise FileNotFoundError(f"No ELF produced in {build_dir}")
-    name = applet_dir.name
+    name = preferred_name or applet_dir.name
     elfs.sort()
     for p in elfs:
         if name in p.name:
@@ -179,6 +320,36 @@ def build_mkimage() -> None:
 def resolve_applets(targets: list[str]) -> list[Path]:
     if not targets:
         return discover_applets()
+    configured = load_configure_specs()
+    if configured:
+        by_ref = {f"{section}/{name}": path for section, name, path in configured}
+        by_name: dict[str, list[Path]] = {}
+        by_output: dict[str, list[Path]] = {}
+        for _section, name, path in configured:
+            by_name.setdefault(name, []).append(path)
+            out = get_applet_output_name(path)
+            by_output.setdefault(out, []).append(path)
+        result: list[Path] = []
+        for target in targets:
+            if "/" in target:
+                path = by_ref.get(target)
+                if path is None:
+                    log(f"Skipping missing applet directory: {target}")
+                    continue
+                result.append(path)
+                continue
+            candidates = by_name.get(target, [])
+            if not candidates:
+                candidates = by_output.get(target, [])
+            if not candidates:
+                log(f"Skipping missing applet directory: {target}")
+                continue
+            if len(candidates) > 1:
+                names = ", ".join(str(p) for p in candidates)
+                raise SystemExit(f"Ambiguous applet '{target}' matches: {names}")
+            result.append(candidates[0])
+        return result
+
     result: list[Path] = []
     for name in targets:
         path = APPLETS_DIR / name
@@ -208,19 +379,35 @@ def parse_only_targets(args: list[str]) -> list[str]:
     return targets
 
 
-def build_applets(targets: list[str] | None = None) -> None:
-    applets = resolve_applets(targets or [])
+def build_applets(targets: list[str] | None = None, distribution: str | None = None) -> None:
+    if distribution is None:
+        distribution = os.environ.get("MAGNOLIA_DIST") or os.environ.get("MAGNOLIA_DISTRIBUTION")
+    if distribution:
+        applets = resolve_distribution(distribution, targets or [])
+    else:
+        applets = [(applet, None) for applet in resolve_applets(targets or [])]
     ROOTFS_BIN_DIR.mkdir(parents=True, exist_ok=True)
     if not applets:
         log("No applets found.")
         return
+    applet_infos: list[tuple[Path, str]] = []
+    name_map: dict[str, Path] = {}
+    for applet, out_override in applets:
+        out_name = out_override or get_applet_output_name(applet)
+        if not out_name:
+            raise SystemExit(f"Invalid APPLET_NAME in {applet}")
+        if out_name in name_map:
+            raise SystemExit(f"Applet name conflict: {out_name} from {applet} and {name_map[out_name]}")
+        name_map[out_name] = applet
+        applet_infos.append((applet, out_name))
     root_target = parse_idf_target(ROOT / "sdkconfig")
     base_env = os.environ.copy()
     if root_target:
         base_env["IDF_TARGET"] = root_target
 
-    def build_one(applet: Path) -> bool:
-        log(f"Building applet {applet.name} ...")
+    def build_one(info: tuple[Path, str]) -> bool:
+        applet, out_name = info
+        log(f"Building applet {applet.name} -> {out_name} ...")
         if root_target:
             applet_target = parse_idf_target(applet / "sdkconfig")
             if applet_target != root_target:
@@ -247,18 +434,18 @@ def build_applets(targets: list[str] | None = None) -> None:
                 log(f"Skipping failed applet build: {applet.name}")
                 return False
         try:
-            elf_path = find_output_elf(applet)
+            elf_path = find_output_elf(applet, out_name)
         except FileNotFoundError as exc:
             log(str(exc))
             return False
-        out_path = ROOTFS_BIN_DIR / applet.name
+        out_path = ROOTFS_BIN_DIR / out_name
         shutil.copy2(elf_path, out_path)
         log(f"Applet {applet.name} OK -> {out_path}")
         return True
 
     jobs = int(os.environ.get("MAGNOLIA_APPLET_JOBS", os.cpu_count() or 4))
     with ThreadPoolExecutor(max_workers=jobs) as executor:
-        futures = {executor.submit(build_one, applet): applet for applet in applets}
+        futures = {executor.submit(build_one, info): info for info in applet_infos}
         for future in as_completed(futures):
             _ = future.result()
 
@@ -498,13 +685,15 @@ def main() -> int:
         return 2
     cmd = sys.argv[1]
     if cmd == "build":
-        targets = parse_only_targets(sys.argv[2:])
-        build_applets(targets)
+        dist, filtered = parse_distribution(sys.argv[2:])
+        targets = parse_only_targets(filtered)
+        build_applets(targets, distribution=dist)
         create_image()
         return 0
     if cmd == "flash":
+        dist, _filtered = parse_distribution(sys.argv[2:])
         if not IMAGE_PATH.exists():
-            build_applets()
+            build_applets(distribution=dist)
             create_image()
         flash_image()
         return 0

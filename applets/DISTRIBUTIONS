@@ -1,0 +1,364 @@
+# Magnolia applet distributions.
+# Each section is a distribution name used with --dist.
+# Entry format:
+#   section/applet
+#   section/applet -> output_name   (override APPLET_NAME)
+#
+# Example: rust/rdd -> dd
+
+[mainline]
+mainline/build_elf_file_example
+mainline/cat
+mainline/cd
+mainline/chmod
+mainline/chown
+mainline/cp
+mainline/cut
+mainline/date
+mainline/dd
+mainline/df
+mainline/du
+mainline/echo
+mainline/elf_loader_example
+mainline/elftest
+mainline/env
+mainline/false
+mainline/free
+mainline/head
+mainline/hexdump
+mainline/init
+mainline/kill
+mainline/ln
+mainline/login
+mainline/ls
+mainline/medit
+mainline/mkdir
+mainline/mv
+mainline/ps
+mainline/pwd
+mainline/rm
+mainline/sh
+mainline/shell
+mainline/sleep
+mainline/sort
+mainline/tail
+mainline/tee
+mainline/test
+mainline/touch
+mainline/tr
+mainline/true
+mainline/uname
+mainline/user
+mainline/vi
+mainline/xxd
+
+[experimental-rust]
+mainline/build_elf_file_example
+mainline/cat
+mainline/cd
+mainline/chmod
+mainline/chown
+mainline/cp
+mainline/cut
+mainline/date
+mainline/df
+mainline/du
+mainline/echo
+mainline/elf_loader_example
+mainline/elftest
+mainline/env
+mainline/false
+mainline/free
+mainline/head
+mainline/init
+mainline/kill
+mainline/ln
+mainline/login
+mainline/ls
+mainline/medit
+mainline/mkdir
+mainline/mv
+mainline/ps
+mainline/pwd
+mainline/rm
+mainline/sh
+mainline/shell
+mainline/sleep
+mainline/sort
+mainline/tail
+mainline/tee
+mainline/test
+mainline/touch
+mainline/tr
+mainline/true
+mainline/uname
+mainline/user
+mainline/vi
+rust/edit
+rust/rdd -> dd
+rust/rhexdump -> hexdump
+rust/rselftest
+rust/rshello
+rust/rusthello
+rust/rxxd -> xxd
+
+[experimental-zig]
+mainline/build_elf_file_example
+mainline/cat
+mainline/cd
+mainline/chmod
+mainline/chown
+mainline/cp
+mainline/cut
+mainline/date
+mainline/df
+mainline/du
+mainline/echo
+mainline/elf_loader_example
+mainline/elftest
+mainline/env
+mainline/false
+mainline/free
+mainline/head
+mainline/init
+mainline/kill
+mainline/ln
+mainline/login
+mainline/ls
+mainline/medit
+mainline/mkdir
+mainline/mv
+mainline/ps
+mainline/pwd
+mainline/rm
+mainline/sh
+mainline/shell
+mainline/sleep
+mainline/sort
+mainline/tail
+mainline/tee
+mainline/test
+mainline/touch
+mainline/tr
+mainline/true
+mainline/uname
+mainline/user
+mainline/vi
+zig/zdd -> dd
+zig/zhexdump -> hexdump
+zig/zigdemo
+zig/zighello
+zig/zigtest
+zig/zxxd -> xxd
+
+[experimental-go]
+mainline/build_elf_file_example
+mainline/cat
+mainline/cd
+mainline/chmod
+mainline/chown
+mainline/cp
+mainline/cut
+mainline/date
+mainline/df
+mainline/du
+mainline/elf_loader_example
+mainline/elftest
+mainline/env
+mainline/free
+mainline/head
+mainline/init
+mainline/kill
+mainline/ln
+mainline/login
+mainline/ls
+mainline/medit
+mainline/mkdir
+mainline/mv
+mainline/ps
+mainline/rm
+mainline/sh
+mainline/shell
+mainline/sort
+mainline/tail
+mainline/tee
+mainline/test
+mainline/touch
+mainline/tr
+mainline/user
+mainline/vi
+go/echo -> echo
+go/false -> false
+go/goargs
+go/godd -> dd
+go/gohello
+go/gohexdump -> hexdump
+go/gotest
+go/goxxd -> xxd
+go/pwd -> pwd
+go/sleep -> sleep
+go/true -> true
+go/uname -> uname
+
+[enhanced]
+mainline/build_elf_file_example
+mainline/cat
+mainline/cd
+mainline/chmod
+mainline/chown
+mainline/cp
+mainline/cut
+mainline/date
+mainline/df
+mainline/du
+mainline/echo
+mainline/elf_loader_example
+mainline/elftest
+mainline/env
+mainline/false
+mainline/free
+mainline/head
+mainline/init
+mainline/kill
+mainline/ln
+mainline/login
+mainline/ls
+mainline/mkdir
+mainline/mv
+mainline/ps
+mainline/pwd
+mainline/rm
+mainline/sh
+mainline/shell
+mainline/sleep
+mainline/sort
+mainline/tail
+mainline/tee
+mainline/test
+mainline/touch
+mainline/tr
+mainline/true
+mainline/uname
+mainline/user
+mainline/vi
+rust/edit
+zig/zdd -> dd
+zig/zhexdump -> hexdump
+zig/zxxd -> xxd
+
+[safety]
+mainline/build_elf_file_example
+mainline/cat
+mainline/cd
+mainline/chmod
+mainline/chown
+mainline/cp
+mainline/cut
+mainline/date
+mainline/df
+mainline/du
+mainline/elf_loader_example
+mainline/elftest
+mainline/env
+mainline/free
+mainline/head
+mainline/init
+mainline/kill
+mainline/ln
+mainline/login
+mainline/ls
+mainline/mkdir
+mainline/mv
+mainline/ps
+mainline/rm
+mainline/sh
+mainline/shell
+mainline/sort
+mainline/tail
+mainline/tee
+mainline/test
+mainline/touch
+mainline/tr
+mainline/user
+mainline/vi
+go/echo -> echo
+go/false -> false
+go/pwd -> pwd
+go/sleep -> sleep
+go/true -> true
+go/uname -> uname
+rust/edit
+rust/rdd -> dd
+rust/rhexdump -> hexdump
+rust/rxxd -> xxd
+
+[nightly]
+mainline/build_elf_file_example
+mainline/cat
+mainline/cd
+mainline/chmod
+mainline/chown
+mainline/cp
+mainline/cut
+mainline/date
+mainline/dd
+mainline/df
+mainline/du
+mainline/echo
+mainline/elf_loader_example
+mainline/elftest
+mainline/env
+mainline/false
+mainline/free
+mainline/head
+mainline/hexdump
+mainline/init
+mainline/kill
+mainline/ln
+mainline/login
+mainline/ls
+mainline/medit
+mainline/mkdir
+mainline/mv
+mainline/ps
+mainline/pwd
+mainline/rm
+mainline/sh
+mainline/shell
+mainline/sleep
+mainline/sort
+mainline/tail
+mainline/tee
+mainline/test
+mainline/touch
+mainline/tr
+mainline/true
+mainline/uname
+mainline/user
+mainline/vi
+mainline/xxd
+go/echo -> goecho
+go/false -> gofalse
+go/goargs
+go/godd -> godd
+go/gohello
+go/gohexdump -> gohexdump
+go/gotest
+go/goxxd -> goxxd
+go/pwd -> gopwd
+go/sleep -> gosleep
+go/true -> gotrue
+go/uname -> gouname
+rust/edit
+rust/rdd -> rdd
+rust/rhexdump -> rhexdump
+rust/rselftest
+rust/rshello
+rust/rusthello
+rust/rxxd -> rxxd
+zig/zdd -> zdd
+zig/zhexdump -> zhexdump
+zig/zigdemo
+zig/zighello
+zig/zigtest
+zig/zxxd -> zxxd

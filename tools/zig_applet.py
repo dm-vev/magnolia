@@ -47,7 +47,7 @@ def cmd_new(args: argparse.Namespace) -> None:
     force: bool = args.force
     _check_name(name)
 
-    app_dir = APPLETS_DIR / name
+    app_dir = APPLETS_DIR / "zig" / name
     main_dir = app_dir / "main"
 
     cmake_top = f"""cmake_minimum_required(VERSION 3.5)
@@ -58,14 +58,14 @@ set(IDF_TARGET "esp32s3")
 include($ENV{{IDF_PATH}}/tools/cmake/project.cmake)
 project({name})
 
-include(${{CMAKE_CURRENT_LIST_DIR}}/../../managed_components/espressif__elf_loader/elf_loader.cmake)
+include(${{CMAKE_CURRENT_LIST_DIR}}/../../../managed_components/espressif__elf_loader/elf_loader.cmake)
 set(ELF_CFLAGS -Wl,-z,notext -Wl,-z,noexecstack)
 project_elf({name})
 """
 
     cmake_main = f"""idf_component_register(SRCS "dummy.c")
 
-get_filename_component(MAGNOLIA_ROOT "${{CMAKE_CURRENT_LIST_DIR}}/../../.." ABSOLUTE)
+get_filename_component(MAGNOLIA_ROOT "${{CMAKE_CURRENT_LIST_DIR}}/../../../.." ABSOLUTE)
 include(${{MAGNOLIA_ROOT}}/cmake/magnolia_zig.cmake)
 
 magnolia_zig_add_obj_to_component(
@@ -154,7 +154,7 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    ap_new = sub.add_parser("new", help="Create a new Zig applet skeleton under applets/<name>/")
+    ap_new = sub.add_parser("new", help="Create a new Zig applet skeleton under applets/zig/<name>/")
     ap_new.add_argument("name")
     ap_new.add_argument("--force", action="store_true", help="Overwrite existing files")
     ap_new.set_defaults(func=cmd_new)
@@ -172,4 +172,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-

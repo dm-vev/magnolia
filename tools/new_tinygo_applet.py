@@ -6,7 +6,7 @@ Usage:
   python tools/new_tinygo_applet.py <name> [--add-to-targets]
 
 This generates:
-  applets/<name>/
+  applets/go/<name>/
     CMakeLists.txt
     README.md
     main/CMakeLists.txt
@@ -26,8 +26,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APPLETS_DIR = ROOT / "applets"
-SDK_REL = "../../sdk/tinygo/cmake/MagnoliaTinyGo.cmake"
-SDK_REL_MAIN = "../../../sdk/tinygo/cmake/MagnoliaTinyGo.cmake"
+SDK_REL = "../../../sdk/tinygo/cmake/MagnoliaTinyGo.cmake"
+SDK_REL_MAIN = "../../../../sdk/tinygo/cmake/MagnoliaTinyGo.cmake"
 
 
 def die(msg: str) -> None:
@@ -56,7 +56,7 @@ def main(argv: list[str]) -> int:
 
     check_name(name)
 
-    out_dir = APPLETS_DIR / name
+    out_dir = APPLETS_DIR / "go" / name
     if out_dir.exists():
         die(f"{out_dir} already exists")
 
@@ -73,7 +73,7 @@ project({name})
 include(${{CMAKE_CURRENT_LIST_DIR}}/{SDK_REL})
 magnolia_tinygo_enable_text_relocs()
 
-include(${{CMAKE_CURRENT_LIST_DIR}}/../../managed_components/espressif__elf_loader/elf_loader.cmake)
+include(${{CMAKE_CURRENT_LIST_DIR}}/../../../managed_components/espressif__elf_loader/elf_loader.cmake)
 project_elf({name})
 """,
     )
@@ -88,12 +88,12 @@ TinyGo Magnolia applet scaffolded from `tools/new_tinygo_applet.py`.
 
 ```bash
 source esp-idf/export.sh
-cd applets/{name}
+cd applets/go/{name}
 idf.py set-target esp32s3
 idf.py elf
 ```
 
-Result: `applets/{name}/build/{name}.app.elf`
+Result: `applets/go/{name}/build/{name}.app.elf`
 """,
     )
 
@@ -127,7 +127,7 @@ go 1.22
 
 require magnolia/tinygo v0.0.0
 
-replace magnolia/tinygo => ../../../sdk/tinygo
+replace magnolia/tinygo => ../../../../sdk/tinygo
 """,
     )
 
@@ -150,13 +150,39 @@ func main() {{}}
     )
 
     if add_targets:
-        targets = APPLETS_DIR / "ELF_TARGETS.txt"
+        targets = APPLETS_DIR / "CONFIGURE"
         if not targets.exists():
             die(f"missing {targets}")
         lines = targets.read_text().splitlines()
-        if name not in {ln.strip() for ln in lines if ln.strip() and not ln.lstrip().startswith("#")}:
-            lines.append(name)
-            targets.write_text("\n".join(lines) + "\n")
+        stripped = [ln.strip() for ln in lines]
+        entries = {ln for ln in stripped if ln and not ln.startswith("#") and not ln.startswith("[")}
+        if name in entries:
+            return 0
+        out: list[str] = []
+        inserted = False
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            out.append(line)
+            if line.strip().lower() == "[go]":
+                j = i + 1
+                while j < len(lines):
+                    nxt = lines[j]
+                    if nxt.strip().startswith("["):
+                        break
+                    out.append(nxt)
+                    j += 1
+                out.append(name)
+                out.extend(lines[j:])
+                inserted = True
+                break
+            i += 1
+        if not inserted:
+            if out and out[-1].strip():
+                out.append("")
+            out.append("[go]")
+            out.append(name)
+        targets.write_text("\n".join(out).rstrip() + "\n")
 
     print(f"OK: created {out_dir}")
     return 0
@@ -164,4 +190,3 @@ func main() {{}}
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))
-

@@ -16,11 +16,13 @@
 #endif
 #include <sys/stat.h>
 #include <sys/reent.h>
+#include <sys/select.h>
 #include <sys/time.h>
 #include <sys/times.h>
 #include <ctype.h>
 #include <setjmp.h>
 #include <math.h>
+#include <termios.h>
 #include <time.h>
 #include "esp_log.h"
 
@@ -107,7 +109,9 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     { "ioctl", (void *)m_libc_ioctl },
     { "dup", (void *)m_libc_dup },
     { "dup2", (void *)m_libc_dup2 },
+    M_ELFSYM_EXPORT(ftruncate),
     { "poll", (void *)m_libc_poll },
+    M_ELFSYM_EXPORT(select),
     { "unlink", (void *)m_libc_unlink },
     { "mkdir", (void *)m_libc_mkdir },
     { "chdir", (void *)m_libc_chdir },
@@ -144,20 +148,24 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     M_ELFSYM_EXPORT(memmove),
     M_ELFSYM_EXPORT(memcmp),
     M_ELFSYM_EXPORT(memchr),
+    M_ELFSYM_EXPORT(memrchr),
     M_ELFSYM_EXPORT(strlen),
     M_ELFSYM_EXPORT(strnlen),
     M_ELFSYM_EXPORT(strcmp),
     M_ELFSYM_EXPORT(strncmp),
     M_ELFSYM_EXPORT(strcpy),
+    M_ELFSYM_EXPORT(strcat),
     M_ELFSYM_EXPORT(strncpy),
     M_ELFSYM_EXPORT(strstr),
     M_ELFSYM_EXPORT(strchr),
+    M_ELFSYM_EXPORT(strchrnul),
     M_ELFSYM_EXPORT(strrchr),
     M_ELFSYM_EXPORT(strcspn),
     M_ELFSYM_EXPORT(strspn),
     M_ELFSYM_EXPORT(strpbrk),
     M_ELFSYM_EXPORT(strtok),
     M_ELFSYM_EXPORT(strtok_r),
+    M_ELFSYM_EXPORT(strncasecmp),
     M_ELFSYM_EXPORT(strtol),
     M_ELFSYM_EXPORT(strtoul),
     M_ELFSYM_EXPORT(strtoll),
@@ -258,6 +266,8 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     M_ELFSYM_EXPORT(setenv),
     M_ELFSYM_EXPORT(unsetenv),
     M_ELFSYM_EXPORT(putenv),
+    M_ELFSYM_EXPORT(tcgetattr),
+    M_ELFSYM_EXPORT(tcsetattr),
 
     /* ctype */
     { "_ctype_", (const void *)_ctype_ },
