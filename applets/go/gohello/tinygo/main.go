@@ -4,8 +4,10 @@ import "C"
 
 import "magnolia/tinygo"
 
-//export gohello_go_main
-func gohello_go_main() C.int {
+//export app_main
+func app_main(argc C.int, argv **C.char) C.int {
+	_ = argc
+	_ = argv
 	_, _ = magnolia.WriteString(magnolia.Stdout, "Hello world!\n")
 	return 0
 }

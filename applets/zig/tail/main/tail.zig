@@ -5,6 +5,7 @@ const args = mg.args;
 const constants = mg.constants;
 const fs = mg.fs;
 const io = mg.io;
+const mem = mg.mem;
 
 fn eprintf(comptime fmt: []const u8, list: anytype) void {
     var buf: [256]u8 = undefined;
@@ -25,8 +26,8 @@ fn parseCount(s: []const u8) ?usize {
 
 fn tail_bytes(fd: c_int, count: usize) bool {
     if (count == 0) return true;
-    var ring = std.heap.c_allocator.alloc(u8, count) catch return false;
-    defer std.heap.c_allocator.free(ring);
+    var ring = mem.allocator.alloc(u8, count) catch return false;
+    defer mem.allocator.free(ring);
     var pos: usize = 0;
     var total: usize = 0;
     var buf: [512]u8 = undefined;
@@ -104,9 +105,9 @@ const LineRing = struct {
 
 fn tail_lines(fd: c_int, count: usize, reverse: bool) bool {
     if (count == 0) return true;
-    var ring = LineRing.init(std.heap.c_allocator, count) catch return false;
+    var ring = LineRing.init(mem.allocator, count) catch return false;
     defer ring.deinit();
-    var current = std.ArrayList(u8).init(std.heap.c_allocator);
+    var current = std.ArrayList(u8).init(mem.allocator);
     defer current.deinit();
 
     var buf: [512]u8 = undefined;
@@ -141,7 +142,7 @@ pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
     var verbose = false;
     var reverse = false;
 
-    var files = std.ArrayList([]const u8).init(std.heap.c_allocator);
+    var files = std.ArrayList([]const u8).init(mem.allocator);
     defer files.deinit();
 
     while (it.next()) |argz| {
@@ -231,11 +232,11 @@ pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
             _ = writeBytes(" <==\n");
         }
         const fd = if (std.mem.eql(u8, path, "-")) constants.fd.stdin else blk: {
-            const zpath = std.cstr.addNullByte(std.heap.c_allocator, path) catch {
+            const zpath = mem.allocator.dupeZ(u8, path) catch {
                 failed = true;
                 break :blk constants.fd.stdin;
             };
-            defer std.heap.c_allocator.free(zpath);
+            defer mem.allocator.free(zpath);
             break :blk fs.openZ(zpath, constants.open.O_RDONLY, null) catch {
                 eprintf("tail: {s}: open failed\n", .{path});
                 failed = true;

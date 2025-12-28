@@ -7,7 +7,6 @@
 # Example: rust/rdd -> dd
 
 [mainline]
-mainline/build_elf_file_example
 mainline/cat
 mainline/clear
 mainline/cd
@@ -20,7 +19,6 @@ mainline/dd
 mainline/df
 mainline/du
 mainline/echo
-mainline/elf_loader_example
 mainline/elftest
 mainline/env
 mainline/false
@@ -54,9 +52,8 @@ mainline/vi
 mainline/xxd
 
 [experimental-rust]
-mainline/build_elf_file_example
 mainline/cat
-mainline/clear
+mainline/init
 mainline/cd
 mainline/chmod
 mainline/chown
@@ -66,7 +63,6 @@ mainline/date
 mainline/df
 mainline/du
 mainline/echo
-mainline/elf_loader_example
 mainline/elftest
 mainline/env
 mainline/false
@@ -106,7 +102,6 @@ rust/rusthello
 rust/rxxd -> xxd
 
 [experimental-zig]
-mainline/build_elf_file_example
 mainline/cat
 mainline/clear
 mainline/cd
@@ -118,7 +113,6 @@ mainline/date
 mainline/df
 mainline/du
 mainline/echo
-mainline/elf_loader_example
 mainline/elftest
 mainline/env
 mainline/false
@@ -157,7 +151,6 @@ zig/zigtest
 zig/zxxd -> xxd
 
 [experimental-go]
-mainline/build_elf_file_example
 mainline/cat
 mainline/clear
 mainline/cd
@@ -168,7 +161,6 @@ mainline/cut
 mainline/date
 mainline/df
 mainline/du
-mainline/elf_loader_example
 mainline/elftest
 mainline/env
 mainline/free
@@ -208,7 +200,6 @@ go/true -> true
 go/uname -> uname
 
 [enhanced]
-mainline/build_elf_file_example
 mainline/cat
 mainline/cd
 mainline/chmod
@@ -219,7 +210,6 @@ mainline/date
 mainline/df
 mainline/du
 mainline/echo
-mainline/elf_loader_example
 mainline/elftest
 mainline/env
 mainline/false
@@ -254,7 +244,6 @@ zig/zhexdump -> hexdump
 zig/zxxd -> xxd
 
 [safety]
-mainline/build_elf_file_example
 mainline/cat
 mainline/cd
 mainline/chmod
@@ -264,7 +253,6 @@ mainline/cut
 mainline/date
 mainline/df
 mainline/du
-mainline/elf_loader_example
 mainline/elftest
 mainline/env
 mainline/free
@@ -300,7 +288,6 @@ rust/rhexdump -> hexdump
 rust/rxxd -> xxd
 
 [nightly]
-mainline/build_elf_file_example
 mainline/cat
 mainline/cd
 mainline/chmod
@@ -312,7 +299,6 @@ mainline/dd
 mainline/df
 mainline/du
 mainline/echo
-mainline/elf_loader_example
 mainline/elftest
 mainline/env
 mainline/false

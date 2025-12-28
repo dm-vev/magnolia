@@ -67,7 +67,7 @@ fn skipInput(fd: c_int, blocks: u64, ibs: usize) bool {
     if (blocks == 0) return true;
     const offset: sys.off_t = @intCast(@as(i64, @intCast(blocks)) * @as(i64, @intCast(ibs)));
     if (sys.lseek(fd, offset, constants.seek.cur) >= 0) return true;
-    var buf = mem.allocSlice(u8, ibs) catch return false;
+    const buf = mem.allocSlice(u8, ibs) catch return false;
     defer mem.freeSlice(u8, buf);
     var left = blocks;
     while (left > 0) : (left -= 1) {
@@ -81,7 +81,7 @@ fn seekOutput(fd: c_int, blocks: u64, obs: usize) bool {
     if (blocks == 0) return true;
     const offset: sys.off_t = @intCast(@as(i64, @intCast(blocks)) * @as(i64, @intCast(obs)));
     if (sys.lseek(fd, offset, constants.seek.cur) >= 0) return true;
-    var zeros = mem.allocSlice(u8, obs) catch return false;
+    const zeros = mem.allocSlice(u8, obs) catch return false;
     defer mem.freeSlice(u8, zeros);
     @memset(zeros, 0);
     var left = blocks;
@@ -184,12 +184,18 @@ fn ddMain(argv: []const []const u8) c_int {
         eprintf("dd: block size cannot be zero\n", .{});
         return 1;
     }
+    if (ibs > std.math.maxInt(usize) or obs > std.math.maxInt(usize)) {
+        eprintf("dd: block size too large\n", .{});
+        return 1;
+    }
+    const ibs_size: usize = @intCast(ibs);
+    const obs_size: usize = @intCast(obs);
 
     var in_fd: c_int = constants.fd.stdin;
     var out_fd: c_int = constants.fd.stdout;
     if (ifile) |path| {
-        const zpath = std.cstr.addNullByte(std.heap.page_allocator, path) catch return 1;
-        defer std.heap.page_allocator.free(zpath);
+        const zpath = mem.allocator.dupeZ(u8, path) catch return 1;
+        defer mem.allocator.free(zpath);
         in_fd = fs.openZ(zpath, constants.open.O_RDONLY, null) catch {
             eprintf("dd: {s}: open failed\n", .{path});
             return 1;
@@ -197,8 +203,8 @@ fn ddMain(argv: []const []const u8) c_int {
         defer fs.close(in_fd) catch {};
     }
     if (ofile) |path| {
-        const zpath = std.cstr.addNullByte(std.heap.page_allocator, path) catch return 1;
-        defer std.heap.page_allocator.free(zpath);
+        const zpath = mem.allocator.dupeZ(u8, path) catch return 1;
+        defer mem.allocator.free(zpath);
         var flags: c_int = constants.open.O_WRONLY | constants.open.O_CREAT;
         if (!notrunc) {
             flags |= constants.open.O_TRUNC;
@@ -210,18 +216,18 @@ fn ddMain(argv: []const []const u8) c_int {
         defer fs.close(out_fd) catch {};
     }
 
-    if (!skipInput(in_fd, skip, @intCast(ibs))) {
+    if (!skipInput(in_fd, skip, ibs_size)) {
         eprintf("dd: skip failed\n", .{});
         return 1;
     }
-    if (!seekOutput(out_fd, seek, @intCast(obs))) {
+    if (!seekOutput(out_fd, seek, obs_size)) {
         eprintf("dd: seek failed\n", .{});
         return 1;
     }
 
-    var ibuf = mem.allocSlice(u8, @intCast(ibs)) catch return 1;
+    const ibuf = mem.allocSlice(u8, ibs_size) catch return 1;
     defer mem.freeSlice(u8, ibuf);
-    var obuf = mem.allocSlice(u8, @intCast(obs)) catch return 1;
+    const obuf = mem.allocSlice(u8, obs_size) catch return 1;
     defer mem.freeSlice(u8, obuf);
 
     var obuf_len: usize = 0;
@@ -241,22 +247,22 @@ fn ddMain(argv: []const []const u8) c_int {
             break;
         };
         if (n == 0) break;
-        if (n == ibs) {
+        if (n == ibs_size) {
             in_full += 1;
         } else {
             in_part += 1;
         }
         var chunk_len = n;
-        if (sync and chunk_len < ibs) {
+        if (sync and chunk_len < ibs_size) {
             @memset(ibuf[chunk_len..], 0);
-            chunk_len = ibs;
+            chunk_len = ibs_size;
         }
         if (obs == ibs) {
             fs.writeAll(out_fd, ibuf[0..chunk_len]) catch {
                 eprintf("dd: write error\n", .{});
                 break;
             };
-            if (chunk_len == obs) {
+            if (chunk_len == obs_size) {
                 out_full += 1;
             } else {
                 out_part += 1;
@@ -264,12 +270,12 @@ fn ddMain(argv: []const []const u8) c_int {
         } else {
             var off: usize = 0;
             while (off < chunk_len) {
-                const space = obs - obuf_len;
+                const space = obs_size - obuf_len;
                 const take = if (chunk_len - off < space) chunk_len - off else space;
-                std.mem.copy(u8, obuf[obuf_len..obuf_len + take], ibuf[off..off + take]);
+                std.mem.copyForwards(u8, obuf[obuf_len..obuf_len + take], ibuf[off..off + take]);
                 obuf_len += take;
                 off += take;
-                if (obuf_len == obs) {
+                if (obuf_len == obs_size) {
                     fs.writeAll(out_fd, obuf) catch {
                         eprintf("dd: write error\n", .{});
                         return 1;
@@ -300,7 +306,7 @@ fn ddMain(argv: []const []const u8) c_int {
 pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
     var it = args.Args.init(argc, argv);
     _ = it.next();
-    var list = std.ArrayList([]const u8).init(std.heap.page_allocator);
+    var list = std.ArrayList([]const u8).init(mem.allocator);
     defer list.deinit();
     while (it.next()) |p| {
         list.append(args.zslice(p)) catch {};

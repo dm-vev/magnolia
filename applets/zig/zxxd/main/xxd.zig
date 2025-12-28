@@ -3,6 +3,7 @@ const mg = @import("magnolia");
 
 const fs = mg.fs;
 const io = mg.io;
+const mem = mg.mem;
 const args = mg.args;
 const constants = mg.constants;
 const sys = mg.sys;
@@ -85,7 +86,10 @@ fn skipBytes(fd: c_int, skip: *u64) bool {
     var buf: [256]u8 = undefined;
     while (skip.* > 0) {
         const want = if (skip.* < buf.len) @as(usize, @intCast(skip.*)) else buf.len;
-        const n = fs.readSome(fd, buf[0..want]) catch return false;
+        const n = fs.readSome(fd, buf[0..want]) catch |err| {
+            eprintf("xxd: read failed: {s}\n", .{@errorName(err)});
+            return false;
+        };
         if (n == 0) return false;
         skip.* -= @intCast(n);
     }
@@ -101,7 +105,10 @@ fn reverseStream(fd: c_int) bool {
 
     var buf: [128]u8 = undefined;
     while (true) {
-        const n = fs.readSome(fd, buf[0..]) catch return false;
+        const n = fs.readSome(fd, buf[0..]) catch |err| {
+            eprintf("xxd: read failed: {s}\n", .{@errorName(err)});
+            return false;
+        };
         if (n == 0) break;
         for (buf[0..n]) |c| {
             if (c == '\n' or c == '\r') {
@@ -169,18 +176,24 @@ fn xxdForward(fd: c_int, skip: u64, length: u64, use_length: bool, columns: usiz
     var skip_left = skip;
     if (!skipBytes(fd, &skip_left)) return false;
     var offset: u64 = 0;
-    var buf = std.ArrayList(u8).init(std.heap.page_allocator);
+    var buf = std.ArrayList(u8).init(mem.allocator);
     defer buf.deinit();
-    _ = buf.resize(columns) catch {};
+    buf.resize(columns) catch {
+        eprintf("xxd: out of memory\n", .{});
+        return false;
+    };
 
     var remaining = length;
     while (true) {
         var want = columns;
         if (use_length and remaining < want) want = @intCast(remaining);
-        const n = fs.readSome(fd, buf.items[0..want]) catch return false;
+        const n = fs.readSome(fd, buf.items[0..want]) catch |err| {
+            eprintf("xxd: read failed: {s}\n", .{@errorName(err)});
+            return false;
+        };
         if (n == 0) break;
         if (plain) {
-            var line = std.ArrayList(u8).init(std.heap.page_allocator);
+            var line = std.ArrayList(u8).init(mem.allocator);
             defer line.deinit();
             var i: usize = 0;
             while (i < n) : (i += 1) {
@@ -191,7 +204,7 @@ fn xxdForward(fd: c_int, skip: u64, length: u64, use_length: bool, columns: usiz
             }
             _ = io.writeAll(constants.fd.stdout, line.items) catch {};
         } else {
-            var line = std.ArrayList(u8).init(std.heap.page_allocator);
+            var line = std.ArrayList(u8).init(mem.allocator);
             defer line.deinit();
             var header: [16]u8 = undefined;
             const h = std.fmt.bufPrint(&header, "{x:0>8}: ", .{offset}) catch "";
@@ -234,7 +247,7 @@ fn xxdMain(argv: []const []const u8) c_int {
     var reverse = false;
     var upper = false;
 
-    var files = std.ArrayList([]const u8).init(std.heap.page_allocator);
+    var files = std.ArrayList([]const u8).init(mem.allocator);
     defer files.deinit();
 
     var i: usize = 0;
@@ -298,8 +311,8 @@ fn xxdMain(argv: []const []const u8) c_int {
     const path = if (files.items.len > 0) files.items[0] else null;
     var fd: c_int = constants.fd.stdin;
     if (path) |p| {
-        const zpath = std.cstr.addNullByte(std.heap.page_allocator, p) catch return 1;
-        defer std.heap.page_allocator.free(zpath);
+        const zpath = mem.allocator.dupeZ(u8, p) catch return 1;
+        defer mem.allocator.free(zpath);
         fd = fs.openZ(zpath, constants.open.O_RDONLY, null) catch {
             eprintf("xxd: {s}: open failed\n", .{p});
             return 1;
@@ -318,7 +331,7 @@ fn xxdMain(argv: []const []const u8) c_int {
 pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
     var it = args.Args.init(argc, argv);
     _ = it.next();
-    var list = std.ArrayList([]const u8).init(std.heap.page_allocator);
+    var list = std.ArrayList([]const u8).init(mem.allocator);
     defer list.deinit();
     while (it.next()) |p| {
         list.append(args.zslice(p)) catch {};

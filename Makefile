@@ -7,7 +7,7 @@ DIST ?=
 QEMU_SERIAL ?= stdio
 QEMU_TCP_PORT ?= 5555
 
-.PHONY: applets vfs-image flash-vfs flash
+.PHONY: applets vfs-image flash-vfs flash clean
 .PHONY: qemu
 
 applets vfs-image:
@@ -26,3 +26,7 @@ qemu:
 	bash -lc 'source $(IDF_EXPORT) >/dev/null 2>&1 && MAGNOLIA_BUILD_DIR=build/qemu $(PY) tools/applets.py build $(if $(DIST),--dist $(DIST),)'
 	bash -lc 'source $(IDF_EXPORT) >/dev/null 2>&1 && MAGNOLIA_BUILD_DIR=build/qemu $(PY) tools/applets.py qemu-image'
 	bash -lc 'source $(IDF_EXPORT) >/dev/null 2>&1; set -e; if [ "$(QEMU_SERIAL)" = "tcp" ]; then qemu-system-xtensa -M esp32s3 -drive file=build/qemu/qemu_flash.bin,if=mtd,format=raw -drive file=build/qemu/qemu_efuse.bin,if=none,format=raw,id=efuse -global driver=nvram.esp32c3.efuse,property=drive,value=efuse -global driver=timer.esp32s3.timg,property=wdt_disable,value=true -nic user,model=open_eth -nographic -serial tcp::$(QEMU_TCP_PORT),server & QPID=$$!; trap "kill $$QPID 2>/dev/null || true" EXIT; sleep 1; srctree="$(PWD)" IDF_PROJECT_PATH="$(PWD)" idf.py monitor -p socket://localhost:$(QEMU_TCP_PORT); else qemu-system-xtensa -M esp32s3 -drive file=build/qemu/qemu_flash.bin,if=mtd,format=raw -drive file=build/qemu/qemu_efuse.bin,if=none,format=raw,id=efuse -global driver=nvram.esp32c3.efuse,property=drive,value=efuse -global driver=timer.esp32s3.timg,property=wdt_disable,value=true -nic user,model=open_eth -nographic -serial mon:stdio; fi'
+
+clean:
+	rm -rf build
+	find applets -maxdepth 3 -type d -name build -prune -exec rm -rf {} +

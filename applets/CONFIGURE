@@ -4,7 +4,6 @@
 # trim the list or use --only to select a compatible set.
 
 [mainline]
-build_elf_file_example
 cd
 chmod
 chown

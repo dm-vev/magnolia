@@ -5,6 +5,7 @@ const args = mg.args;
 const constants = mg.constants;
 const fs = mg.fs;
 const io = mg.io;
+const mem = mg.mem;
 
 fn eprintf(comptime fmt: []const u8, list: anytype) void {
     var buf: [256]u8 = undefined;
@@ -21,7 +22,7 @@ pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
     _ = it.next();
 
     var append = false;
-    var files = std.ArrayList([]const u8).init(std.heap.c_allocator);
+    var files = std.ArrayList([]const u8).init(mem.allocator);
     defer files.deinit();
 
     while (it.next()) |argz| {
@@ -54,7 +55,7 @@ pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
         }
     }
 
-    var fds = std.ArrayList(c_int).init(std.heap.c_allocator);
+    var fds = std.ArrayList(c_int).init(mem.allocator);
     defer {
         for (fds.items) |fd| {
             if (fd >= 0) fs.close(fd) catch {};
@@ -63,11 +64,11 @@ pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
     }
 
     for (files.items) |path| {
-        const zpath = std.cstr.addNullByte(std.heap.c_allocator, path) catch {
+        const zpath = mem.allocator.dupeZ(u8, path) catch {
             eprintf("tee: {s}: invalid path\n", .{path});
             continue;
         };
-        defer std.heap.c_allocator.free(zpath);
+        defer mem.allocator.free(zpath);
         const flags = if (append) constants.open.O_WRONLY | constants.open.O_CREAT | constants.open.O_APPEND else constants.open.O_WRONLY | constants.open.O_CREAT | constants.open.O_TRUNC;
         const fd = fs.openZ(zpath, flags, 0o666) catch {
             eprintf("tee: {s}: open failed\n", .{path});

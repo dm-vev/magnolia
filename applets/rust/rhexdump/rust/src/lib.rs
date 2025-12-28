@@ -2,6 +2,7 @@
 
 extern crate alloc;
 
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use magnolia_applet::fs;
@@ -136,15 +137,15 @@ fn render_char(b: u8, out: &mut String) {
             out.push('\\');
             out.push('t');
         }
-        b'\b' => {
+        b'\x08' => {
             out.push('\\');
             out.push('b');
         }
-        b'\f' => {
+        b'\x0c' => {
             out.push('\\');
             out.push('f');
         }
-        b'\v' => {
+        b'\x0b' => {
             out.push('\\');
             out.push('v');
         }
@@ -286,6 +287,7 @@ fn hexdump_fd(fd: i32, name: &str, mode: FormatMode, verbose: bool, offset: &mut
     let mut prev = [0u8; LINE_BYTES];
     let mut prev_len = 0usize;
     let mut suppressed = false;
+    let mut remaining = remaining;
 
     loop {
         if *skip > 0 {
@@ -294,7 +296,7 @@ fn hexdump_fd(fd: i32, name: &str, mode: FormatMode, verbose: bool, offset: &mut
             }
         }
         let mut want = LINE_BYTES;
-        if let Some(rem) = remaining {
+        if let Some(rem) = remaining.as_deref_mut() {
             if *rem == 0 {
                 break;
             }
@@ -313,7 +315,7 @@ fn hexdump_fd(fd: i32, name: &str, mode: FormatMode, verbose: bool, offset: &mut
         if n == 0 {
             break;
         }
-        if let Some(rem) = remaining {
+        if let Some(rem) = remaining.as_deref_mut() {
             *rem -= n as u64;
         }
         let same = !verbose && prev_len == n && prev[..n] == buf[..n];

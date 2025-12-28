@@ -118,15 +118,15 @@ fn renderChar(list: *std.ArrayList(u8), b: u8) void {
             _ = list.append('\\') catch {};
             _ = list.append('t') catch {};
         },
-        '\b' => {
+        0x08 => {
             _ = list.append('\\') catch {};
             _ = list.append('b') catch {};
         },
-        '\f' => {
+        0x0c => {
             _ = list.append('\\') catch {};
             _ = list.append('f') catch {};
         },
-        '\v' => {
+        0x0b => {
             _ = list.append('\\') catch {};
             _ = list.append('v') catch {};
         },
@@ -147,7 +147,7 @@ fn renderChar(list: *std.ArrayList(u8), b: u8) void {
 }
 
 fn printLine(mode: FormatMode, offset: u64, buf: []const u8) void {
-    var list = std.ArrayList(u8).init(std.heap.page_allocator);
+    var list = std.ArrayList(u8).init(mem.allocator);
     defer list.deinit();
     pushHex(&list, offset, 8);
     _ = list.append(' ') catch {};
@@ -205,7 +205,7 @@ fn printLine(mode: FormatMode, offset: u64, buf: []const u8) void {
             var i: usize = 0;
             while (i < LINE_BYTES) : (i += 2) {
                 if (i + 1 < buf.len) {
-                    const word: u16 = @intCast(buf[i]) | (@as(u16, @intCast(buf[i + 1])) << 8);
+                    const word: u16 = @as(u16, buf[i]) | (@as(u16, buf[i + 1]) << 8);
                     _ = list.append(' ') catch {};
                     switch (mode) {
                         .ShortDec => {
@@ -284,7 +284,7 @@ fn hexdumpFd(fd: c_int, name: []const u8, mode: FormatMode, verbose: bool,
         } else {
             suppressed = false;
             printLine(mode, offset.*, buf[0..n]);
-            std.mem.copy(u8, prev[0..n], buf[0..n]);
+            std.mem.copyForwards(u8, prev[0..n], buf[0..n]);
             prev_len = n;
         }
         offset.* += @intCast(n);
@@ -299,7 +299,7 @@ fn hexdumpMain(argv: []const []const u8) c_int {
     var skip: u64 = 0;
     var use_length = false;
 
-    var files = std.ArrayList([]const u8).init(std.heap.page_allocator);
+    var files = std.ArrayList([]const u8).init(mem.allocator);
     defer files.deinit();
 
     var i: usize = 0;
@@ -358,8 +358,8 @@ fn hexdumpMain(argv: []const []const u8) c_int {
         if (!ok) rc = 1;
     } else {
         for (files.items) |path| {
-            const zpath = std.cstr.addNullByte(std.heap.page_allocator, path) catch return 1;
-            defer std.heap.page_allocator.free(zpath);
+            const zpath = mem.allocator.dupeZ(u8, path) catch return 1;
+            defer mem.allocator.free(zpath);
             const fd = fs.openZ(zpath, constants.open.O_RDONLY, null) catch {
                 eprintf("hexdump: {s}: open failed\n", .{path});
                 rc = 1;
@@ -382,7 +382,7 @@ fn hexdumpMain(argv: []const []const u8) c_int {
 pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
     var it = args.Args.init(argc, argv);
     _ = it.next();
-    var list = std.ArrayList([]const u8).init(std.heap.page_allocator);
+    var list = std.ArrayList([]const u8).init(mem.allocator);
     defer list.deinit();
     while (it.next()) |p| {
         list.append(args.zslice(p)) catch {};

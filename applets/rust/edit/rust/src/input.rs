@@ -3,10 +3,12 @@
  * Copyright (c) 2025 Magnolia Project
  * All rights reserved.
  */
+use alloc::vec;
 use alloc::vec::Vec;
 
 use magnolia_applet::io;
 use magnolia_applet::sys;
+use magnolia_applet::time;
 
 use crate::key::*;
 
@@ -121,6 +123,19 @@ impl Input {
         }
     }
 
+    fn wait_for_escape_tail(&mut self) {
+        if !self.buf.is_empty() {
+            return;
+        }
+        for _ in 0..20 {
+            self.fill();
+            if !self.buf.is_empty() {
+                return;
+            }
+            let _ = time::usleep(1000);
+        }
+    }
+
     fn ensure(&mut self) {
         if self.buf.is_empty() {
             self.fill();
@@ -203,6 +218,7 @@ impl Input {
             }
             let first = self.read_byte();
             if first == 0x1b {
+                self.wait_for_escape_tail();
                 if self.buf.is_empty() {
                     return InputEvent { key: KEY_QUIT, data: None };
                 }
@@ -254,11 +270,9 @@ impl Input {
                         break;
                     }
 
+                    self.wait_for_escape_tail();
                     if self.buf.is_empty() {
-                        self.fill();
-                        if self.buf.is_empty() {
-                            break;
-                        }
+                        break;
                     }
 
                     let next = self.read_byte();

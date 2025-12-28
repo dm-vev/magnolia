@@ -86,8 +86,10 @@ macro(magnolia_rust_project_elf project_name)
 
     if(EXISTS "${_MRPE_CRATE_DIR}/Cargo.lock")
         set(_MRPE_LOCKED_FLAG "--locked")
+        set(_MRPE_LOCKFILE_DEP "${_MRPE_CRATE_DIR}/Cargo.lock")
     else()
         set(_MRPE_LOCKED_FLAG "")
+        set(_MRPE_LOCKFILE_DEP "")
     endif()
 
     file(GLOB_RECURSE _MRPE_RUST_SOURCES CONFIGURE_DEPENDS "${_MRPE_CRATE_DIR}/src/*.rs")
@@ -122,7 +124,7 @@ macro(magnolia_rust_project_elf project_name)
                  '${CMAKE_AR}' rcs '${_MRPE_RUST_LIB}' *.o"
         DEPENDS
                 "${_MRPE_CRATE_DIR}/Cargo.toml"
-                "${_MRPE_CRATE_DIR}/Cargo.lock"
+                ${_MRPE_LOCKFILE_DEP}
                 ${_MRPE_RUST_SOURCES}
                 ${_MRPE_SDK_SOURCES}
         VERBATIM

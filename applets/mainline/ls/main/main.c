@@ -187,6 +187,10 @@ static int ls_dir(const char *path, const ls_opts_t *opts)
 int main(int argc, char **argv)
 {
     ls_opts_t opts = {0};
+    optind = 1;
+#ifdef optreset
+    optreset = 1;
+#endif
 
     int opt;
     while ((opt = getopt(argc, argv, "ald1")) != -1) {

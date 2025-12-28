@@ -5,6 +5,7 @@ const args = mg.args;
 const constants = mg.constants;
 const fs = mg.fs;
 const io = mg.io;
+const mem = mg.mem;
 
 fn eprintf(comptime fmt: []const u8, list: anytype) void {
     var buf: [256]u8 = undefined;
@@ -126,7 +127,7 @@ pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
     var show_tabs = false;
     var show_nonprint = false;
 
-    var files = std.ArrayList([]const u8).init(std.heap.c_allocator);
+    var files = std.ArrayList([]const u8).init(mem.allocator);
     defer files.deinit();
 
     while (it.next()) |argz| {
@@ -186,11 +187,11 @@ pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
             }
             continue;
         }
-        const zpath = std.cstr.addNullByte(std.heap.c_allocator, path) catch {
+        const zpath = mem.allocator.dupeZ(u8, path) catch {
             failed = true;
             continue;
         };
-        defer std.heap.c_allocator.free(zpath);
+        defer mem.allocator.free(zpath);
         const fd = fs.openZ(zpath, constants.open.O_RDONLY, null) catch {
             eprintf("cat: {s}: open failed\n", .{path});
             failed = true;

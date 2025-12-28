@@ -5,6 +5,7 @@ const args = mg.args;
 const constants = mg.constants;
 const fs = mg.fs;
 const io = mg.io;
+const mem = mg.mem;
 
 const Range = struct {
     start: isize,
@@ -144,7 +145,7 @@ fn cut_fields_line(line: []const u8, ranges: []const Range, delim: u8, suppress_
 
 fn cut_fields(fd: c_int, ranges: []const Range, delim: u8, suppress_no_delim: bool) bool {
     var buf: [256]u8 = undefined;
-    var line = std.ArrayList(u8).init(std.heap.c_allocator);
+    var line = std.ArrayList(u8).init(mem.allocator);
     defer line.deinit();
     while (true) {
         const n = fs.readSome(fd, &buf) catch return false;
@@ -177,7 +178,7 @@ pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
     var delim: u8 = '\t';
     var suppress_no_delim = false;
 
-    var files = std.ArrayList([]const u8).init(std.heap.c_allocator);
+    var files = std.ArrayList([]const u8).init(mem.allocator);
     defer files.deinit();
 
     while (it.next()) |argz| {
@@ -241,11 +242,11 @@ pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
         return 1;
     }
 
-    const ranges = parseRanges(list, std.heap.c_allocator) orelse {
+    const ranges = parseRanges(list, mem.allocator) orelse {
         eprintf("cut: invalid list '{s}'\n", .{list});
         return 1;
     };
-    defer std.heap.c_allocator.free(ranges);
+    defer mem.allocator.free(ranges);
 
     const do_bytes = mode == 'b' or mode == 'c';
 
@@ -259,11 +260,11 @@ pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
     var failed = false;
     for (files.items) |path| {
         const fd = if (std.mem.eql(u8, path, "-")) constants.fd.stdin else blk: {
-            const zpath = std.cstr.addNullByte(std.heap.c_allocator, path) catch {
+            const zpath = mem.allocator.dupeZ(u8, path) catch {
                 failed = true;
                 break :blk constants.fd.stdin;
             };
-            defer std.heap.c_allocator.free(zpath);
+            defer mem.allocator.free(zpath);
             break :blk fs.openZ(zpath, constants.open.O_RDONLY, null) catch {
                 eprintf("cut: {s}: open failed\n", .{path});
                 failed = true;

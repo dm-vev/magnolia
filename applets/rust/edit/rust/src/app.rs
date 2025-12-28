@@ -29,7 +29,9 @@ fn edit_main(args: &[String]) -> i32 {
     } else {
         let mut editor = Editor::new(next_id, 4, 500);
         next_id += 1;
-        let cwd = fs::getcwd().ok().and_then(|v| String::from_utf8(v).ok()).unwrap_or_else(|| "/".to_string());
+        let cwd = fs::getcwd().ok()
+            .and_then(|v| String::from_utf8(v).ok())
+            .unwrap_or_else(|| String::from("/"));
         editor.get_file(&cwd);
         editors.push(editor);
     }
@@ -98,7 +100,7 @@ fn args_to_vec(args: Args) -> Vec<String> {
             continue;
         }
         if let Ok(s) = arg.to_str() {
-            out.push(s.to_string());
+            out.push(String::from(s));
         }
     }
     out

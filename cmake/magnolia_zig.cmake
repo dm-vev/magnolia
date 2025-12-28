@@ -113,6 +113,7 @@ function(magnolia_zig_add_obj_to_component)
                 -mcpu ${MZIG_MCPU}
                 ${_mzig_pic_flag}
                 "${MZIG_OPTIMIZE}"
+                -lc
                 ${MZIG_ZIG_FLAGS}
                 --dep magnolia
                 -Mroot=${MZIG_SRC}

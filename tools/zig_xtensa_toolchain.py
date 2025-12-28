@@ -128,6 +128,9 @@ def ensure_toolchain(install_dir: Path, repo: str, tag: str) -> Path:
     candidates.sort(key=lambda p: len(str(p)))
     real_zig = candidates[0]
 
+    if real_zig == zig_link:
+        return zig_link
+
     try:
         zig_link.symlink_to(real_zig)
     except OSError:
@@ -160,4 +163,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-
