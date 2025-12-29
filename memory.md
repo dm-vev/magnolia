@@ -15,5 +15,8 @@
 - Updated mainline and Rust `mkdir` to match BSD option parsing, symbolic mode handling, and -p directory creation semantics with correct errors and permissions.
 - Updated `applets/mainline/rm` to use `lstat` so symlinks are removed directly (no recursive traversal), and to avoid prompting for non-existent paths.
 - Added mainline BSD applets `printenv` and `rev`.
+- Added mainline BSD applet `printf`.
 - Updated mainline and Zig `cut` to enforce BSD option rules (-b/-c/-f exclusivity, -d/-s/-n validation), improve range parsing and error reporting, and fix field output for unterminated lines with robust I/O handling.
 - Updated `applets/mainline/touch` to implement BSD touch option parsing (-A/-a/-c/-f/-h/-m/-r/-t), time parsing, and robust timestamp updates with correct creation semantics.
+- Updated `applets/mainline/env` to implement BSD env option parsing (-i/-u/-P/-S/-v), argument splitting for -S, environment clearing, and exec path search with robust error handling.
+- Updated Go `pwd` to match BSD/mainline behavior by validating $PWD with stat, honoring -L/-P, handling long paths, and reporting too many arguments.
