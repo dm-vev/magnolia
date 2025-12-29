@@ -20,3 +20,4 @@
 - Updated `applets/mainline/touch` to implement BSD touch option parsing (-A/-a/-c/-f/-h/-m/-r/-t), time parsing, and robust timestamp updates with correct creation semantics.
 - Updated `applets/mainline/env` to implement BSD env option parsing (-i/-u/-P/-S/-v), argument splitting for -S, environment clearing, and exec path search with robust error handling.
 - Updated Go `pwd` to match BSD/mainline behavior by validating $PWD with stat, honoring -L/-P, handling long paths, and reporting too many arguments.
+- Reworked `applets/mainline/ln` to remove GNU options, implement BSD-style option parsing, hard/symbolic link creation, overwrite prompting, and directory handling with recursive -F removal.
