@@ -1,19 +1,19 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 typedef struct {
-    long start;
-    long end; /* -1 for open-ended */
+    size_t start;
+    size_t end; /* SIZE_MAX for open-ended ranges. */
 } range_t;
-
-static const char *g_version = "Magnolia coreutils 0.1";
 
 static void eprintf(const char *fmt, ...)
 {
@@ -32,27 +32,22 @@ static void eprintf(const char *fmt, ...)
     (void)write(STDERR_FILENO, buf, len);
 }
 
-static bool streq(const char *a, const char *b)
+static void usage(void)
 {
-    return a && b && strcmp(a, b) == 0;
+    eprintf("usage: cut -b list [-n] [file ...]\n");
+    eprintf("       cut -c list [file ...]\n");
+    eprintf("       cut -f list [-d delim] [-s] [file ...]\n");
 }
 
-static void print_help(void)
+static ssize_t read_retry(int fd, void *buf, size_t len)
 {
-    printf("usage: cut OPTION... [FILE]...\n");
-    printf("  -b LIST       select only these bytes\n");
-    printf("  -c LIST       select only these characters\n");
-    printf("  -f LIST       select only these fields\n");
-    printf("  -d DELIM      use DELIM instead of TAB for fields\n");
-    printf("  -s            do not print lines without delimiters\n");
-    printf("      --help    display this help and exit\n");
-    printf("      --version output version information and exit\n");
-    printf("LIST supports N, N-M, N-, -M separated by commas.\n");
-}
-
-static void print_version(void)
-{
-    printf("cut (%s)\n", g_version);
+    while (1) {
+        ssize_t r = read(fd, buf, len);
+        if (r < 0 && errno == EINTR) {
+            continue;
+        }
+        return r;
+    }
 }
 
 static int write_all(int fd, const void *buf, size_t len)
@@ -62,6 +57,13 @@ static int write_all(int fd, const void *buf, size_t len)
     while (off < len) {
         ssize_t w = write(fd, p + off, len - off);
         if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (w == 0) {
+            errno = EIO;
             return -1;
         }
         off += (size_t)w;
@@ -69,44 +71,89 @@ static int write_all(int fd, const void *buf, size_t len)
     return 0;
 }
 
-static int parse_ranges(const char *list, range_t *ranges, size_t cap, size_t *out_n)
+static int parse_number(const char *s, char **end, size_t *out)
 {
-    *out_n = 0;
-    if (!list || *list == '\0') {
+    if (!s || *s == '\0') {
         return -1;
     }
-    const char *p = list;
-    while (*p) {
-        if (*out_n >= cap) {
+    if (*s == '+' || *s == '-') {
+        return -1;
+    }
+    errno = 0;
+    char *e = NULL;
+    unsigned long long v = strtoull(s, &e, 10);
+    if (errno == ERANGE || e == s) {
+        return -1;
+    }
+    if (v == 0 || v > SIZE_MAX) {
+        return -1;
+    }
+    *end = e;
+    *out = (size_t)v;
+    return 0;
+}
+
+static int append_range(range_t **ranges, size_t *count, size_t *cap, size_t start, size_t end)
+{
+    if (*count == *cap) {
+        size_t next = *cap ? (*cap * 2u) : 8u;
+        if (next < *cap || next > SIZE_MAX / sizeof(range_t)) {
+            errno = EOVERFLOW;
             return -1;
         }
-        long start = -1;
-        long end = -1;
+        range_t *tmp = (range_t *)realloc(*ranges, next * sizeof(range_t));
+        if (!tmp) {
+            errno = ENOMEM;
+            return -1;
+        }
+        *ranges = tmp;
+        *cap = next;
+    }
+    (*ranges)[*count].start = start;
+    (*ranges)[*count].end = end;
+    (*count)++;
+    return 0;
+}
+
+static int parse_ranges(const char *list, range_t **out_ranges, size_t *out_n)
+{
+    if (!list || *list == '\0') {
+        errno = EINVAL;
+        return -1;
+    }
+
+    range_t *ranges = NULL;
+    size_t count = 0;
+    size_t cap = 0;
+
+    const char *p = list;
+    while (*p != '\0') {
+        size_t start = 0;
+        size_t end = 0;
         if (*p == '-') {
-            start = 1;
             p++;
             char *e = NULL;
-            end = strtol(p, &e, 10);
-            if (e == p || end < 1) {
-                return -1;
+            if (parse_number(p, &e, &end) != 0) {
+                goto invalid;
             }
+            start = 1;
             p = e;
         } else {
             char *e = NULL;
-            start = strtol(p, &e, 10);
-            if (e == p || start < 1) {
-                return -1;
+            if (parse_number(p, &e, &start) != 0) {
+                goto invalid;
             }
             p = e;
             if (*p == '-') {
                 p++;
                 if (*p == '\0' || *p == ',') {
-                    end = -1;
+                    end = SIZE_MAX;
                 } else {
-                    e = NULL;
-                    end = strtol(p, &e, 10);
-                    if (e == p || end < start) {
-                        return -1;
+                    if (parse_number(p, &e, &end) != 0) {
+                        goto invalid;
+                    }
+                    if (end < start) {
+                        goto invalid;
                     }
                     p = e;
                 }
@@ -114,41 +161,56 @@ static int parse_ranges(const char *list, range_t *ranges, size_t cap, size_t *o
                 end = start;
             }
         }
-        ranges[*out_n].start = start;
-        ranges[*out_n].end = end;
-        (*out_n)++;
+
+        if (append_range(&ranges, &count, &cap, start, end) != 0) {
+            free(ranges);
+            return -1;
+        }
+
         if (*p == ',') {
             p++;
+            if (*p == '\0') {
+                goto invalid;
+            }
             continue;
         }
         if (*p != '\0') {
-            return -1;
+            goto invalid;
         }
     }
+
+    *out_ranges = ranges;
+    *out_n = count;
     return 0;
+
+invalid:
+    free(ranges);
+    errno = EINVAL;
+    return -1;
 }
 
-static bool selected(long idx, const range_t *ranges, size_t n)
+static bool selected(size_t idx, const range_t *ranges, size_t n)
 {
     for (size_t i = 0; i < n; ++i) {
-        long a = ranges[i].start;
-        long b = ranges[i].end;
+        size_t a = ranges[i].start;
+        size_t b = ranges[i].end;
         if (idx < a) {
             continue;
         }
-        if (b < 0 || idx <= b) {
+        if (b == SIZE_MAX || idx <= b) {
             return true;
         }
     }
     return false;
 }
 
-static int cut_stream_bytes(const range_t *ranges, size_t n)
+static int cut_stream_bytes(int fd, const range_t *ranges, size_t n)
 {
     char buf[256];
-    long pos = 0;
+    size_t pos = 0;
+
     while (1) {
-        ssize_t r = read(STDIN_FILENO, buf, sizeof(buf));
+        ssize_t r = read_retry(fd, buf, sizeof(buf));
         if (r < 0) {
             return -1;
         }
@@ -156,16 +218,21 @@ static int cut_stream_bytes(const range_t *ranges, size_t n)
             return 0;
         }
         for (ssize_t i = 0; i < r; ++i) {
-            pos++;
-            if (buf[i] == '\n') {
+            unsigned char ch = (unsigned char)buf[i];
+            if (ch == '\n') {
                 pos = 0;
                 if (write_all(STDOUT_FILENO, "\n", 1) != 0) {
                     return -1;
                 }
                 continue;
             }
+            if (pos == SIZE_MAX) {
+                errno = EOVERFLOW;
+                return -1;
+            }
+            pos++;
             if (selected(pos, ranges, n)) {
-                if (write_all(STDOUT_FILENO, &buf[i], 1) != 0) {
+                if (write_all(STDOUT_FILENO, &ch, 1) != 0) {
                     return -1;
                 }
             }
@@ -173,7 +240,56 @@ static int cut_stream_bytes(const range_t *ranges, size_t n)
     }
 }
 
-static int cut_stream_fields(const range_t *ranges, size_t n, char delim, bool suppress_no_delim)
+static int cut_fields_line(const char *line, size_t len, const range_t *ranges, size_t n,
+                           char delim, bool suppress_no_delim, bool had_newline)
+{
+    bool has_delim = (memchr(line, delim, len) != NULL);
+    if (!has_delim) {
+        if (suppress_no_delim) {
+            return 0;
+        }
+        if (len > 0 && write_all(STDOUT_FILENO, line, len) != 0) {
+            return -1;
+        }
+        if (had_newline && write_all(STDOUT_FILENO, "\n", 1) != 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    size_t field = 1;
+    bool first_out = true;
+    size_t start = 0;
+    for (size_t j = 0; j <= len; ++j) {
+        bool end_field = (j == len) || (line[j] == delim);
+        if (!end_field) {
+            continue;
+        }
+        if (selected(field, ranges, n)) {
+            if (!first_out) {
+                if (write_all(STDOUT_FILENO, &delim, 1) != 0) {
+                    return -1;
+                }
+            }
+            if (j > start) {
+                if (write_all(STDOUT_FILENO, line + start, j - start) != 0) {
+                    return -1;
+                }
+            }
+            first_out = false;
+        }
+        field++;
+        start = j + 1;
+    }
+
+    if (had_newline && write_all(STDOUT_FILENO, "\n", 1) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int cut_stream_fields(int fd, const range_t *ranges, size_t n, char delim,
+                             bool suppress_no_delim)
 {
     char buf[256];
     char *line = NULL;
@@ -181,7 +297,7 @@ static int cut_stream_fields(const range_t *ranges, size_t n, char delim, bool s
     size_t cap = 0;
 
     while (1) {
-        ssize_t r = read(STDIN_FILENO, buf, sizeof(buf));
+        ssize_t r = read_retry(fd, buf, sizeof(buf));
         if (r < 0) {
             goto fail;
         }
@@ -189,10 +305,22 @@ static int cut_stream_fields(const range_t *ranges, size_t n, char delim, bool s
             break;
         }
         for (ssize_t i = 0; i < r; ++i) {
-            if (len + 2 > cap) {
-                size_t next = cap ? cap * 2 : 128;
-                while (next < len + 2) {
-                    next *= 2;
+            char ch = buf[i];
+            if (ch == '\n') {
+                if (cut_fields_line(line, len, ranges, n, delim, suppress_no_delim, true) != 0) {
+                    goto fail;
+                }
+                len = 0;
+                continue;
+            }
+            if (len + 1 > cap) {
+                size_t next = cap ? (cap * 2u) : 128u;
+                while (next < len + 1) {
+                    if (next > SIZE_MAX / 2u) {
+                        errno = EOVERFLOW;
+                        goto fail;
+                    }
+                    next *= 2u;
                 }
                 char *tmp = (char *)realloc(line, next);
                 if (!tmp) {
@@ -202,48 +330,13 @@ static int cut_stream_fields(const range_t *ranges, size_t n, char delim, bool s
                 line = tmp;
                 cap = next;
             }
-            line[len++] = buf[i];
-            if (buf[i] == '\n') {
-                line[len] = '\0';
+            line[len++] = ch;
+        }
+    }
 
-                bool has_delim = (memchr(line, delim, len) != NULL);
-                if (!has_delim && suppress_no_delim) {
-                    len = 0;
-                    continue;
-                }
-
-                long field = 1;
-                bool first_out = true;
-                size_t start = 0;
-                for (size_t j = 0; j <= len; ++j) {
-                    bool end_field = (j == len) || (line[j] == delim) || (line[j] == '\n') || (line[j] == '\0');
-                    if (!end_field) {
-                        continue;
-                    }
-                    if (selected(field, ranges, n)) {
-                        if (!first_out) {
-                            if (write_all(STDOUT_FILENO, &delim, 1) != 0) {
-                                goto fail;
-                            }
-                        }
-                        if (j > start) {
-                            if (write_all(STDOUT_FILENO, line + start, j - start) != 0) {
-                                goto fail;
-                            }
-                        }
-                        first_out = false;
-                    }
-                    if (line[j] == '\n') {
-                        break;
-                    }
-                    field++;
-                    start = j + 1;
-                }
-                if (write_all(STDOUT_FILENO, "\n", 1) != 0) {
-                    goto fail;
-                }
-                len = 0;
-            }
+    if (len > 0) {
+        if (cut_fields_line(line, len, ranges, n, delim, suppress_no_delim, false) != 0) {
+            goto fail;
         }
     }
 
@@ -257,37 +350,37 @@ fail:
 
 int main(int argc, char **argv)
 {
-    for (int i = 1; i < argc; ++i) {
-        if (streq(argv[i], "--help")) {
-            print_help();
-            return 0;
-        }
-        if (streq(argv[i], "--version")) {
-            print_version();
-            return 0;
-        }
-    }
+    opterr = 0;
 
     const char *list = NULL;
-    bool fields = false;
     char delim = '\t';
+    bool delim_set = false;
     bool suppress_no_delim = false;
+    bool no_split = false;
+    bool bflag = false;
+    bool cflag = false;
+    bool fflag = false;
 
     int opt;
-    while ((opt = getopt(argc, argv, "b:c:f:d:s")) != -1) {
+    while ((opt = getopt(argc, argv, ":b:c:d:f:sn")) != -1) {
         switch (opt) {
         case 'b':
+            list = optarg;
+            bflag = true;
+            break;
         case 'c':
             list = optarg;
-            fields = false;
+            cflag = true;
             break;
         case 'f':
             list = optarg;
-            fields = true;
+            fflag = true;
             break;
         case 'd':
-            if (!optarg || !optarg[0] || optarg[1]) {
-                eprintf("cut: invalid delimiter\n");
+            delim_set = true;
+            if (!optarg || optarg[0] == '\0' || optarg[1] != '\0') {
+                eprintf("cut: delimiter must be a single character\n");
+                usage();
                 return 1;
             }
             delim = optarg[0];
@@ -295,32 +388,75 @@ int main(int argc, char **argv)
         case 's':
             suppress_no_delim = true;
             break;
+        case 'n':
+            no_split = true;
+            break;
+        case ':':
+            eprintf("cut: option requires an argument -- %c\n", optopt);
+            usage();
+            return 1;
         default:
-            eprintf("usage: cut (-b LIST|-c LIST|-f LIST) [FILE...]\n");
+            eprintf("cut: illegal option -- %c\n", optopt);
+            usage();
             return 1;
         }
     }
 
-    if (!list) {
-        eprintf("cut: you must specify a list of bytes, characters, or fields\n");
+    int mode_count = (bflag ? 1 : 0) + (cflag ? 1 : 0) + (fflag ? 1 : 0);
+    if (mode_count == 0) {
+        usage();
+        return 1;
+    }
+    if (mode_count > 1) {
+        eprintf("cut: only one type of list may be specified\n");
+        usage();
+        return 1;
+    }
+    if (!fflag && delim_set) {
+        eprintf("cut: -d is only valid with -f\n");
+        usage();
+        return 1;
+    }
+    if (!fflag && suppress_no_delim) {
+        eprintf("cut: -s is only valid with -f\n");
+        usage();
+        return 1;
+    }
+    if (!bflag && no_split) {
+        eprintf("cut: -n is only valid with -b\n");
+        usage();
         return 1;
     }
 
-    range_t ranges[64];
-    size_t nr = 0;
-    if (parse_ranges(list, ranges, sizeof(ranges) / sizeof(ranges[0]), &nr) != 0) {
-        eprintf("cut: invalid list: %s\n", list);
+    if (!list || *list == '\0') {
+        eprintf("cut: invalid byte, character, or field list\n");
         return 1;
     }
+
+    range_t *ranges = NULL;
+    size_t nr = 0;
+    if (parse_ranges(list, &ranges, &nr) != 0) {
+        if (errno == ENOMEM || errno == EOVERFLOW) {
+            eprintf("cut: %s\n", strerror(errno));
+        } else {
+            eprintf("cut: invalid byte, character, or field list\n");
+        }
+        free(ranges);
+        return 1;
+    }
+
+    /* TODO: Implement multibyte-aware -c/-n once locale support is available. */
 
     int failed = 0;
     if (optind >= argc) {
-        int rc = fields ? cut_stream_fields(ranges, nr, delim, suppress_no_delim)
-                        : cut_stream_bytes(ranges, nr);
+        int rc = fflag ? cut_stream_fields(STDIN_FILENO, ranges, nr, delim, suppress_no_delim)
+                       : cut_stream_bytes(STDIN_FILENO, ranges, nr);
         if (rc != 0) {
             eprintf("cut: %s\n", strerror(errno));
+            free(ranges);
             return 1;
         }
+        free(ranges);
         return 0;
     }
 
@@ -335,33 +471,19 @@ int main(int argc, char **argv)
             failed = 1;
             continue;
         }
-        int saved = dup(STDIN_FILENO);
-        if (saved < 0) {
-            if (fd != STDIN_FILENO) {
-                (void)close(fd);
-            }
-            eprintf("cut: dup: %s\n", strerror(errno));
-            return 1;
-        }
-        if (fd != STDIN_FILENO) {
-            if (dup2(fd, STDIN_FILENO) < 0) {
-                (void)close(saved);
-                (void)close(fd);
-                eprintf("cut: dup2: %s\n", strerror(errno));
-                return 1;
-            }
-        }
-        int rc = fields ? cut_stream_fields(ranges, nr, delim, suppress_no_delim)
-                        : cut_stream_bytes(ranges, nr);
-        if (rc != 0) {
-            eprintf("cut: %s: %s\n", path, strerror(errno));
-            failed = 1;
-        }
-        (void)dup2(saved, STDIN_FILENO);
-        (void)close(saved);
+        int rc = fflag ? cut_stream_fields(fd, ranges, nr, delim, suppress_no_delim)
+                       : cut_stream_bytes(fd, ranges, nr);
+        int saved_errno = errno;
         if (fd != STDIN_FILENO) {
             (void)close(fd);
         }
+        if (rc != 0) {
+            errno = saved_errno;
+            eprintf("cut: %s: %s\n", path, strerror(errno));
+            failed = 1;
+        }
     }
+
+    free(ranges);
     return failed ? 1 : 0;
 }
