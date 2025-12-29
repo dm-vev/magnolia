@@ -26,3 +26,4 @@
 - Updated Zig `cat` to track numbering/blank-line state across files, add buffered output with -u support, and report BSD-style read/write errors.
 - Added mainline BSD applet `cksum`.
 - Updated `applets/mainline/kill` to allow BSD-style pid targeting (including 0/negative), expand signal name handling, and tighten list-mode parsing.
+- Updated Zig `head` to mirror BSD/mainline option parsing, header handling, and error reporting with robust I/O.
