@@ -1,9 +1,13 @@
 package main
 
+/*
+#include <time.h>
+*/
 import "C"
 
 import (
 	"magnolia/tinygo"
+	"math"
 	"strconv"
 	"unsafe"
 )
@@ -13,67 +17,70 @@ func eprintf(msg string) {
 }
 
 func usage() {
-	eprintf("usage: sleep seconds[s|m|h|d]...\n")
+	eprintf("usage: sleep seconds\n")
 }
 
-func parseDuration(arg string) (float64, bool) {
+func illegalInterval(arg string) {
+	eprintf("sleep: illegal time interval -- " + arg + "\n")
+	usage()
+}
+
+// Match the platform time_t range to keep behavior aligned with mainline.
+func timeTMaxSeconds() float64 {
+	var t C.time_t
+	bits := uint(unsafe.Sizeof(t) * 8)
+	if C.time_t(-1) > 0 {
+		if bits >= 64 {
+			return float64(^uint64(0))
+		}
+		return float64((uint64(1) << bits) - 1)
+	}
+	if bits >= 64 {
+		return float64(^uint64(0) >> 1)
+	}
+	return float64((uint64(1) << (bits - 1)) - 1)
+}
+
+func parseSeconds(arg string, maxSeconds float64) (float64, bool) {
 	if len(arg) == 0 {
 		return 0, false
 	}
-	unit := arg[len(arg)-1]
-	mult := 1.0
-	num := arg
-	switch unit {
-	case 's':
-		mult = 1.0
-		num = arg[:len(arg)-1]
-	case 'm':
-		mult = 60.0
-		num = arg[:len(arg)-1]
-	case 'h':
-		mult = 3600.0
-		num = arg[:len(arg)-1]
-	case 'd':
-		mult = 86400.0
-		num = arg[:len(arg)-1]
-	default:
-		if unit < '0' || unit > '9' {
-			return 0, false
-		}
-	}
-	if len(num) == 0 {
+	v, err := strconv.ParseFloat(arg, 64)
+	if err != nil || math.IsInf(v, 0) || math.IsNaN(v) || v < 0 {
 		return 0, false
 	}
-	v, err := strconv.ParseFloat(num, 64)
-	if err != nil || v < 0 {
+	if v > maxSeconds {
 		return 0, false
 	}
-	return v * mult, true
+	return v, true
 }
 
 func sleepSeconds(total float64) {
 	if total <= 0 {
 		return
 	}
-	for total >= 1.0 {
+	secPart, frac := math.Modf(total)
+	for secPart >= 1.0 {
 		maxChunk := float64(^uint32(0))
 		var chunk uint32
-		if total > maxChunk {
+		if secPart > maxChunk {
 			chunk = ^uint32(0)
 		} else {
-			chunk = uint32(total)
+			chunk = uint32(secPart)
 		}
 		if chunk == 0 {
 			break
 		}
 		magnolia.Sleep(chunk)
-		total -= float64(chunk)
+		secPart -= float64(chunk)
 	}
-	if total > 0 {
-		usec := uint32(total*1_000_000.0 + 0.5)
-		if usec > 0 {
-			_ = magnolia.Usleep(usec)
-		}
+	usec := uint32(frac * 1_000_000.0)
+	if usec >= 1_000_000 {
+		magnolia.Sleep(1)
+		usec = 0
+	}
+	if usec > 0 {
+		_ = magnolia.Usleep(usec)
 	}
 }
 
@@ -84,18 +91,15 @@ func app_main(argc C.int, argv **C.char) C.int {
 		usage()
 		return 1
 	}
-	total := 0.0
-	for i := 1; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			continue
-		}
-		v, ok := parseDuration(arg)
-		if !ok {
-			usage()
-			return 1
-		}
-		total += v
+	maxSeconds := timeTMaxSeconds()
+	total, ok := parseSeconds(args[1], maxSeconds)
+	if !ok {
+		illegalInterval(args[1])
+		return 1
+	}
+	if len(args) > 2 {
+		illegalInterval(args[2])
+		return 1
 	}
 	sleepSeconds(total)
 	return 0
