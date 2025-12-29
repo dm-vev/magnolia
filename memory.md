@@ -14,4 +14,6 @@
 - Updated mainline and Zig `tee` to BSD-compatible option parsing (-a/-i), signal handling, output file semantics, and robust read/write error handling.
 - Updated mainline and Rust `mkdir` to match BSD option parsing, symbolic mode handling, and -p directory creation semantics with correct errors and permissions.
 - Updated `applets/mainline/rm` to use `lstat` so symlinks are removed directly (no recursive traversal), and to avoid prompting for non-existent paths.
+- Added mainline BSD applets `printenv` and `rev`.
 - Updated mainline and Zig `cut` to enforce BSD option rules (-b/-c/-f exclusivity, -d/-s/-n validation), improve range parsing and error reporting, and fix field output for unterminated lines with robust I/O handling.
+- Updated `applets/mainline/touch` to implement BSD touch option parsing (-A/-a/-c/-f/-h/-m/-r/-t), time parsing, and robust timestamp updates with correct creation semantics.
