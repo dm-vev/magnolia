@@ -9,5 +9,7 @@
 - Added mainline BSD applets `wc` and `yes`.
 - Reworked `applets/mainline/tail` to implement BSD tail option parsing (legacy counts, -n/-c, -q/-v, -f/-F, -r), safe binary line/byte handling, and follow-mode behavior with robust I/O.
 - Updated `applets/mainline/pwd` to validate `PWD` against the current directory and handle long paths via dynamic getcwd buffers.
+- Added mainline BSD applets `cmp` and `comm`.
 - Updated mainline and Go `uname` to BSD-style options/output ordering, removed GNU-only flags, and aligned nodename/arch/version outputs for cross-distribution parity.
 - Updated mainline and Zig `tee` to BSD-compatible option parsing (-a/-i), signal handling, output file semantics, and robust read/write error handling.
+- Updated mainline and Rust `mkdir` to match BSD option parsing, symbolic mode handling, and -p directory creation semantics with correct errors and permissions.
