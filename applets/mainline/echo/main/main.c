@@ -29,6 +29,13 @@ static int write_all(int fd, const void *buf, size_t len)
     while (off < len) {
         ssize_t w = write(fd, p + off, len - off);
         if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (w == 0) {
+            errno = EIO;
             return -1;
         }
         off += (size_t)w;
@@ -36,10 +43,11 @@ static int write_all(int fd, const void *buf, size_t len)
     return 0;
 }
 
-static int write_str(int fd, const char *s)
-{
-    return write_all(fd, s, strlen(s));
-}
+enum echo_escape_result {
+    ECHO_ESCAPE_OK = 0,
+    ECHO_ESCAPE_STOP = 1,
+    ECHO_ESCAPE_ERROR = -1,
+};
 
 static int echo_write_escaped(const char *s)
 {
@@ -78,7 +86,8 @@ static int echo_write_escaped(const char *s)
                 out = '\v';
                 break;
             case 'c':
-                return 0;
+                // \c stops output and suppresses the trailing newline.
+                return ECHO_ESCAPE_STOP;
             case '0': {
                 unsigned value = 0;
                 unsigned digits = 0;
@@ -96,7 +105,7 @@ static int echo_write_escaped(const char *s)
             }
             default:
                 if (write_all(STDOUT_FILENO, "\\", 1) != 0) {
-                    return -1;
+                    return ECHO_ESCAPE_ERROR;
                 }
                 out = next;
                 break;
@@ -104,42 +113,21 @@ static int echo_write_escaped(const char *s)
         }
 
         if (write_all(STDOUT_FILENO, &out, 1) != 0) {
-            return -1;
+            return ECHO_ESCAPE_ERROR;
         }
     }
-    return 0;
+    return ECHO_ESCAPE_OK;
 }
 
 int main(int argc, char **argv)
 {
     bool newline = true;
-    bool escapes = false;
 
     int i = 1;
-    if (i < argc && argv[i] != NULL && strcmp(argv[i], "--") == 0) {
+    // BSD echo only recognizes a single leading -n.
+    if (i < argc && argv[i] != NULL && strcmp(argv[i], "-n") == 0) {
+        newline = false;
         i++;
-    } else {
-        while (i < argc && argv[i] != NULL && argv[i][0] == '-' && argv[i][1] != '\0') {
-            const char *opt = argv[i] + 1;
-            bool any = false;
-            for (; *opt != '\0'; ++opt) {
-                any = true;
-                if (*opt == 'n') {
-                    newline = false;
-                } else if (*opt == 'e') {
-                    escapes = true;
-                } else if (*opt == 'E') {
-                    escapes = false;
-                } else {
-                    any = false;
-                    break;
-                }
-            }
-            if (!any) {
-                break;
-            }
-            i++;
-        }
     }
 
     bool first = true;
@@ -153,10 +141,14 @@ int main(int argc, char **argv)
         }
         first = false;
 
-        int rc = escapes ? echo_write_escaped(arg) : write_str(STDOUT_FILENO, arg);
-        if (rc != 0) {
+        int rc = echo_write_escaped(arg);
+        if (rc == ECHO_ESCAPE_ERROR) {
             eprintf("echo: write: %s\n", strerror(errno));
             return 1;
+        }
+        if (rc == ECHO_ESCAPE_STOP) {
+            newline = false;
+            return 0;
         }
     }
 

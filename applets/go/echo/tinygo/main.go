@@ -13,10 +13,6 @@ func writeByte(b byte) bool {
 	return magnolia.WriteAll(magnolia.Stdout, buf[:]) == nil
 }
 
-func writeString(s string) bool {
-	return magnolia.WriteAll(magnolia.Stdout, []byte(s)) == nil
-}
-
 func writeEscaped(s string) (stop bool, ok bool) {
 	for i := 0; i < len(s); i++ {
 		b := s[i]
@@ -79,38 +75,12 @@ func writeEscaped(s string) (stop bool, ok bool) {
 func app_main(argc C.int, argv **C.char) C.int {
 	args := magnolia.Args(int32(argc), unsafe.Pointer(argv))
 	newline := true
-	escapes := false
 
 	i := 1
-	if i < len(args) && args[i] == "--" {
+	// BSD echo only recognizes a single leading -n.
+	if i < len(args) && args[i] == "-n" {
+		newline = false
 		i++
-	} else {
-		for i < len(args) {
-			a := args[i]
-			if len(a) < 2 || a[0] != '-' {
-				break
-			}
-			valid := true
-			for j := 1; j < len(a); j++ {
-				switch a[j] {
-				case 'n':
-					newline = false
-				case 'e':
-					escapes = true
-				case 'E':
-					escapes = false
-				default:
-					valid = false
-				}
-				if !valid {
-					break
-				}
-			}
-			if !valid {
-				break
-			}
-			i++
-		}
 	}
 
 	first := true
@@ -121,19 +91,13 @@ func app_main(argc C.int, argv **C.char) C.int {
 			}
 		}
 		first = false
-		if escapes {
-			stop, ok := writeEscaped(args[i])
-			if !ok {
-				return 1
-			}
-			if stop {
-				newline = false
-				break
-			}
-		} else {
-			if !writeString(args[i]) {
-				return 1
-			}
+		stop, ok := writeEscaped(args[i])
+		if !ok {
+			return 1
+		}
+		if stop {
+			newline = false
+			return 0
 		}
 	}
 
