@@ -23,6 +23,21 @@ config MAGNOLIA_DEVFS_PIPES
         Build the /dev/pipeX family that exposes unidirectional FIFO streams
         backed by shared memory and scheduler wait/wake mechanisms.
 
+config MAGNOLIA_DEVFS_KMSG
+    bool "Enable /dev/kmsg log device"
+    default y
+    depends on MAGNOLIA_VFS_DEVFS && MAGNOLIA_IPC_ENABLED
+    help
+        Build /dev/kmsg for reading kernel log output from userland.
+
+config MAGNOLIA_DEVFS_KMSG_BUFFER_SIZE
+    int "Kernel log buffer size"
+    range 256 65536
+    default 4096
+    depends on MAGNOLIA_DEVFS_KMSG
+    help
+        Size of the shared ring buffer used for kernel log retention.
+
 config MAGNOLIA_DEVFS_PIPE_COUNT
     int "Number of pipe instances"
     range 1 16

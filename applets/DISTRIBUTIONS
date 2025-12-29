@@ -7,16 +7,21 @@
 # Example: rust/rdd -> dd
 
 [mainline]
+mainline/basename
 mainline/cat
 mainline/clear
 mainline/cd
 mainline/chmod
 mainline/chown
+mainline/cksum
+mainline/cmp
+mainline/comm
 mainline/cp
 mainline/cut
 mainline/date
 mainline/dd
 mainline/df
+mainline/dirname
 mainline/du
 mainline/echo
 mainline/elftest
@@ -31,11 +36,17 @@ mainline/ln
 mainline/login
 mainline/ls
 mainline/medit
+mainline/netstat
 mainline/mkdir
 mainline/mv
 mainline/ps
+mainline/printenv
+mainline/printf
+mainline/paste
 mainline/pwd
 mainline/rm
+mainline/rmdir
+mainline/rev
 mainline/sh
 mainline/shell
 mainline/sleep
@@ -43,24 +54,39 @@ mainline/sort
 mainline/tail
 mainline/tee
 mainline/test
+mainline/nettest
+mainline/aptest
+mainline/ifc
+mainline/ping
+mainline/sysctl
+mainline/dmesg
+mainline/fbctl
 mainline/touch
 mainline/tr
 mainline/true
 mainline/uname
+mainline/unlink
 mainline/user
 mainline/vi
+mainline/wc
+mainline/yes
 mainline/xxd
 
 [experimental-rust]
+mainline/basename
 mainline/cat
 mainline/init
 mainline/cd
 mainline/chmod
 mainline/chown
+mainline/cksum
+mainline/cmp
+mainline/comm
 mainline/cp
 mainline/cut
 mainline/date
 mainline/df
+mainline/dirname
 mainline/du
 mainline/echo
 mainline/elftest
@@ -77,8 +103,13 @@ mainline/medit
 mainline/mkdir
 mainline/mv
 mainline/ps
+mainline/printenv
+mainline/printf
+mainline/paste
 mainline/pwd
 mainline/rm
+mainline/rmdir
+mainline/rev
 mainline/sh
 mainline/shell
 mainline/sleep
@@ -90,8 +121,11 @@ mainline/touch
 mainline/tr
 mainline/true
 mainline/uname
+mainline/unlink
 mainline/user
 mainline/vi
+mainline/wc
+mainline/yes
 rust/rclear -> clear
 rust/edit
 rust/rdd -> dd
@@ -102,15 +136,20 @@ rust/rusthello
 rust/rxxd -> xxd
 
 [experimental-zig]
+mainline/basename
 mainline/cat
 mainline/clear
 mainline/cd
 mainline/chmod
 mainline/chown
+mainline/cksum
+mainline/cmp
+mainline/comm
 mainline/cp
 mainline/cut
 mainline/date
 mainline/df
+mainline/dirname
 mainline/du
 mainline/echo
 mainline/elftest
@@ -127,8 +166,13 @@ mainline/medit
 mainline/mkdir
 mainline/mv
 mainline/ps
+mainline/printenv
+mainline/printf
+mainline/paste
 mainline/pwd
 mainline/rm
+mainline/rmdir
+mainline/rev
 mainline/sh
 mainline/shell
 mainline/sleep
@@ -140,8 +184,11 @@ mainline/touch
 mainline/tr
 mainline/true
 mainline/uname
+mainline/unlink
 mainline/user
 mainline/vi
+mainline/wc
+mainline/yes
 zig/zclear -> clear
 zig/zdd -> dd
 zig/zhexdump -> hexdump
@@ -151,15 +198,20 @@ zig/zigtest
 zig/zxxd -> xxd
 
 [experimental-go]
+mainline/basename
 mainline/cat
 mainline/clear
 mainline/cd
 mainline/chmod
 mainline/chown
+mainline/cksum
+mainline/cmp
+mainline/comm
 mainline/cp
 mainline/cut
 mainline/date
 mainline/df
+mainline/dirname
 mainline/du
 mainline/elftest
 mainline/env
@@ -174,7 +226,12 @@ mainline/medit
 mainline/mkdir
 mainline/mv
 mainline/ps
+mainline/printenv
+mainline/printf
+mainline/paste
 mainline/rm
+mainline/rmdir
+mainline/rev
 mainline/sh
 mainline/shell
 mainline/sort
@@ -183,8 +240,11 @@ mainline/tee
 mainline/test
 mainline/touch
 mainline/tr
+mainline/unlink
 mainline/user
 mainline/vi
+mainline/wc
+mainline/yes
 go/goclear -> clear
 go/echo -> echo
 go/false -> false
@@ -200,14 +260,19 @@ go/true -> true
 go/uname -> uname
 
 [enhanced]
+mainline/basename
 mainline/cat
 mainline/cd
 mainline/chmod
 mainline/chown
+mainline/cksum
+mainline/cmp
+mainline/comm
 mainline/cp
 mainline/cut
 mainline/date
 mainline/df
+mainline/dirname
 mainline/du
 mainline/echo
 mainline/elftest
@@ -223,8 +288,13 @@ mainline/ls
 mainline/mkdir
 mainline/mv
 mainline/ps
+mainline/printenv
+mainline/printf
+mainline/paste
 mainline/pwd
 mainline/rm
+mainline/rmdir
+mainline/rev
 mainline/sh
 mainline/shell
 mainline/sleep
@@ -236,22 +306,30 @@ mainline/touch
 mainline/tr
 mainline/true
 mainline/uname
+mainline/unlink
 mainline/user
 mainline/vi
+mainline/wc
+mainline/yes
 rust/edit
 zig/zdd -> dd
 zig/zhexdump -> hexdump
 zig/zxxd -> xxd
 
 [safety]
+mainline/basename
 mainline/cat
 mainline/cd
 mainline/chmod
 mainline/chown
+mainline/cksum
+mainline/cmp
+mainline/comm
 mainline/cp
 mainline/cut
 mainline/date
 mainline/df
+mainline/dirname
 mainline/du
 mainline/elftest
 mainline/env
@@ -265,7 +343,12 @@ mainline/ls
 mainline/mkdir
 mainline/mv
 mainline/ps
+mainline/printenv
+mainline/printf
+mainline/paste
 mainline/rm
+mainline/rmdir
+mainline/rev
 mainline/sh
 mainline/shell
 mainline/sort
@@ -274,8 +357,11 @@ mainline/tee
 mainline/test
 mainline/touch
 mainline/tr
+mainline/unlink
 mainline/user
 mainline/vi
+mainline/wc
+mainline/yes
 go/echo -> echo
 go/false -> false
 go/pwd -> pwd
@@ -288,15 +374,20 @@ rust/rhexdump -> hexdump
 rust/rxxd -> xxd
 
 [nightly]
+mainline/basename
 mainline/cat
 mainline/cd
 mainline/chmod
 mainline/chown
+mainline/cksum
+mainline/cmp
+mainline/comm
 mainline/cp
 mainline/cut
 mainline/date
 mainline/dd
 mainline/df
+mainline/dirname
 mainline/du
 mainline/echo
 mainline/elftest
@@ -314,8 +405,13 @@ mainline/medit
 mainline/mkdir
 mainline/mv
 mainline/ps
+mainline/printenv
+mainline/printf
+mainline/paste
 mainline/pwd
 mainline/rm
+mainline/rmdir
+mainline/rev
 mainline/sh
 mainline/shell
 mainline/sleep
@@ -327,8 +423,11 @@ mainline/touch
 mainline/tr
 mainline/true
 mainline/uname
+mainline/unlink
 mainline/user
 mainline/vi
+mainline/wc
+mainline/yes
 mainline/xxd
 go/echo -> goecho
 go/false -> gofalse

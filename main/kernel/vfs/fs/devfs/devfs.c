@@ -21,6 +21,7 @@
 #include "kernel/vfs/fs/devfs/devfs.h"
 #include "kernel/vfs/fs/devfs/devfs_internal.h"
 #include "kernel/vfs/fs/devfs/devfs_diag.h"
+#include "kernel/core/log/m_klog.h"
 #include "kernel/vfs/fs/devfs/devfs_ioctl.h"
 #include "kernel/vfs/fs/devfs/devfs_gpio.h"
 #include "kernel/vfs/fs/devfs/devfs_shm.h"
@@ -1291,6 +1292,20 @@ static m_vfs_error_t devfs_fs_setattr(m_vfs_node_t *node, const m_vfs_stat_t *st
     return M_VFS_ERR_NOT_SUPPORTED;
 }
 
+static m_vfs_error_t devfs_fs_rename(m_vfs_mount_t *mount,
+                                     m_vfs_node_t *old_parent,
+                                     const char *old_name,
+                                     m_vfs_node_t *new_parent,
+                                     const char *new_name)
+{
+    (void)mount;
+    (void)old_parent;
+    (void)old_name;
+    (void)new_parent;
+    (void)new_name;
+    return M_VFS_ERR_NOT_SUPPORTED;
+}
+
 static void devfs_fs_file_destroy(m_vfs_file_t *file)
 {
     (void)file;
@@ -1300,6 +1315,7 @@ static const struct m_vfs_fs_ops s_devfs_ops = {
     .mount = devfs_fs_mount,
     .unmount = devfs_fs_unmount,
     .lookup = devfs_fs_lookup,
+    .rename = devfs_fs_rename,
     .readdir = devfs_fs_readdir,
     .open = devfs_fs_open,
     .close = devfs_fs_close,
@@ -1423,6 +1439,9 @@ void m_devfs_register_default_devices(void)
     devfs_register("/dev/null", &s_devfs_null_ops, NULL);
     devfs_register("/dev/zero", &s_devfs_zero_ops, NULL);
     devfs_register("/dev/random", &s_devfs_random_ops, NULL);
+#if CONFIG_MAGNOLIA_DEVFS_KMSG
+    m_klog_devfs_register();
+#endif
 #if CONFIG_MAGNOLIA_DEVFS_ALLOC
     devfs_alloc_register();
 #endif

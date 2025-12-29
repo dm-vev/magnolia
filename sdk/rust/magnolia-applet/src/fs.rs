@@ -151,8 +151,12 @@ pub fn rename(old_path: &str, new_path: &str) -> Result<()> {
     if old_path == new_path {
         return Ok(());
     }
-    copy_file(old_path, new_path)?;
-    unlink(old_path)?;
+    let cold = CString::new(old_path).map_err(|_| Error { errno: 22 })?; // EINVAL
+    let cnew = CString::new(new_path).map_err(|_| Error { errno: 22 })?; // EINVAL
+    let rc = unsafe { sys::rename(cold.as_ptr(), cnew.as_ptr()) };
+    if rc != 0 {
+        return Err(Error::last());
+    }
     Ok(())
 }
 

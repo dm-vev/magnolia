@@ -24,3 +24,11 @@ pub fn errno() -> i32 {
     }
 }
 
+pub const EINVAL: i32 = 22;
+pub const ENOENT: i32 = 2;
+pub const ENOSPC: i32 = 28;
+pub const EIO: i32 = 5;
+pub const EAGAIN: i32 = 11;
+pub const ENOTSUP: i32 = 95;
+pub const ETIMEDOUT: i32 = 110;
+pub const ECONNREFUSED: i32 = 111;

@@ -59,6 +59,7 @@ set(APP_SRCS
     "main.c"
     "kernel/arch/m_hw_init.c"
     ${ARCH_SRCS}
+    "kernel/core/log/m_klog.c"
     "kernel/core/timer/m_timer_core.c"
     "kernel/core/timer/m_timer_deadline.c"
     "kernel/core/timer/m_timer_queue.c"
@@ -98,6 +99,7 @@ if(CONFIG_MAGNOLIA_VFS_ENABLED)
         "kernel/core/vfs/path/m_vfs_path.c"
         "kernel/core/vfs/fd/m_vfs_fd.c"
         "kernel/core/vfs/diag/m_vfs_diag.c"
+        "kernel/core/svc/m_sysctl.c"
     )
     if(CONFIG_MAGNOLIA_VFS_SELFTESTS)
         list(APPEND APP_SRCS "kernel/core/vfs/core/m_vfs_selftests.c")
@@ -170,6 +172,19 @@ if(CONFIG_MAGNOLIA_IPC_ENABLED)
     endif()
 endif()
 
+if(CONFIG_MAGNOLIA_NET_ENABLE)
+    list(APPEND APP_SRCS
+        "kernel/core/net/m_net.c"
+        "kernel/core/net/m_net_app_api.c"
+    )
+    if(CONFIG_MAGNOLIA_NET_BACKEND_LWIP)
+        list(APPEND APP_SRCS
+            "kernel/core/net/m_net_lwip.c"
+            "kernel/core/net/m_net_errno.c"
+        )
+    endif()
+endif()
+
 list(APPEND APP_SRCS
     "kernel/core/sched/tests/m_sched_tests.c"
 )
@@ -215,6 +230,29 @@ if(CONFIG_MAGNOLIA_ELF_ENABLED)
         endif()
     endif()
 endif()
+
+set(APP_PRIV_REQUIRES
+    newlib
+    esp_timer
+    esp_partition
+    esp_psram
+    esp_driver_gpio
+    esp_driver_usb_serial_jtag
+)
+
+if(CONFIG_MAGNOLIA_NET_ENABLE)
+    list(APPEND APP_PRIV_REQUIRES
+        esp_netif
+        esp_event
+        lwip
+    )
+    if(CONFIG_MAGNOLIA_NET_USE_ETH)
+        list(APPEND APP_PRIV_REQUIRES esp_eth)
+    endif()
+    if(CONFIG_MAGNOLIA_NET_USE_WIFI)
+        list(APPEND APP_PRIV_REQUIRES esp_wifi nvs_flash)
+    endif()
+endif()
 idf_component_register(
     SRCS ${APP_SRCS}
     EMBED_TXTFILES ${APP_EMBED_TXTFILES}
@@ -224,20 +262,18 @@ idf_component_register(
         "kernel/core/sched"
         "kernel/core/job"
         "kernel/core/ipc"
+        "kernel/core/log"
         "kernel/core/memory"
+        "kernel/core/svc"
         "kernel/core/libc"
         "kernel/core/elf"
+        "kernel/core/net"
         "kernel/core/vfs"
         "kernel/vfs"
         "lib"
         "lib/libexec"
     PRIV_REQUIRES
-        newlib
-        esp_timer
-        esp_partition
-        esp_psram
-        esp_driver_gpio
-        esp_driver_usb_serial_jtag
+        ${APP_PRIV_REQUIRES}
 )
 
 if(CONFIG_MAGNOLIA_ALLOC_ENABLED AND CONFIG_MAGNOLIA_ALLOC_WRAP_LIBC)

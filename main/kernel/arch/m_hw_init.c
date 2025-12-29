@@ -11,6 +11,8 @@
 #include "kernel/core/timer/tests/m_timer_tests.h"
 #include "kernel/core/memory/m_alloc.h"
 #include "kernel/core/vfs/m_vfs.h"
+#include "kernel/core/net/m_net.h"
+#include "kernel/core/log/m_klog.h"
 #include "kernel/vfs/fs/littlefs/littlefs_fs.h"
 #include "esp_attr.h"
 #include "esp_err.h"
@@ -192,6 +194,7 @@ void magnolia_hw_init(void)
     m_timer_init();
     m_sched_init();
     ipc_init();
+    m_klog_init();
 
 #if CONFIG_SPIRAM
     ESP_LOGI(TAG,
@@ -206,6 +209,10 @@ void magnolia_hw_init(void)
 
 #if CONFIG_MAGNOLIA_VFS_ENABLED && CONFIG_MAGNOLIA_LITTLEFS_ENABLED
     magnolia_mount_rootfs();
+#endif
+
+#if CONFIG_MAGNOLIA_NET_ENABLE
+    m_net_init();
 #endif
 
 #ifdef CONFIG_MAGNOLIA_SCHED_SELFTESTS

@@ -10,6 +10,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
+#include <sys/select.h>
+#include <sys/socket.h>
 #include <setjmp.h>
 #include <sys/reent.h>
 #include <sys/stat.h>
@@ -44,12 +46,47 @@ int m_libc_open(const char *path, int flags, ...);
 int m_libc_close(int fd);
 ssize_t m_libc_read(int fd, void *buffer, size_t size);
 ssize_t m_libc_write(int fd, const void *buffer, size_t size);
+int m_libc_socket(int domain, int type, int protocol);
+int m_libc_connect(int sockfd, const void *addr, socklen_t addrlen);
+int m_libc_bind(int sockfd, const void *addr, socklen_t addrlen);
+int m_libc_listen(int sockfd, int backlog);
+int m_libc_accept(int sockfd, void *addr, socklen_t *addrlen);
+ssize_t m_libc_send(int sockfd, const void *buf, size_t len, int flags);
+ssize_t m_libc_recv(int sockfd, void *buf, size_t len, int flags);
+ssize_t m_libc_sendto(int sockfd,
+                      const void *buf,
+                      size_t len,
+                      int flags,
+                      const void *dest_addr,
+                      socklen_t addrlen);
+ssize_t m_libc_recvfrom(int sockfd,
+                        void *buf,
+                        size_t len,
+                        int flags,
+                        void *src_addr,
+                        socklen_t *addrlen);
+int m_libc_shutdown(int sockfd, int how);
+int m_libc_setsockopt(int sockfd,
+                      int level,
+                      int optname,
+                      const void *optval,
+                      socklen_t optlen);
+int m_libc_getsockopt(int sockfd,
+                      int level,
+                      int optname,
+                      void *optval,
+                      socklen_t *optlen);
 int m_libc_ftruncate(int fd, off_t length);
 off_t m_libc_lseek(int fd, off_t offset, int whence);
 int m_libc_ioctl(int fd, unsigned long request, ...);
 int m_libc_dup(int oldfd);
 int m_libc_dup2(int oldfd, int newfd);
 int m_libc_poll(void *fds, unsigned long nfds, int timeout_ms);
+int m_libc_select(int nfds,
+                  fd_set *readfds,
+                  fd_set *writefds,
+                  fd_set *exceptfds,
+                  struct timeval *timeout);
 int m_libc_isatty(int fd);
 int m_libc_access(const char *path, int mode);
 int m_libc_remove(const char *path);
@@ -63,6 +100,7 @@ int m_libc_unlink(const char *path);
 int m_libc_mkdir(const char *path, mode_t mode);
 int m_libc_chdir(const char *path);
 char *m_libc_getcwd(char *buffer, size_t size);
+int m_libc_rename(const char *old, const char *newpath);
 int m_libc_stat(const char *path, void *out_stat);
 int m_libc_fstat(int fd, void *out_stat);
 

@@ -1,0 +1,89 @@
+menu "Magnolia Network"
+
+config MAGNOLIA_NET_ENABLE
+    bool "Enable Magnolia network stack"
+    default n
+    depends on MAGNOLIA_JOB_ENABLED
+    help
+        Enable Magnolia network core with a single netdev backed by ESP-IDF.
+
+config MAGNOLIA_NET_BACKEND_LWIP
+    bool "Use ESP-IDF lwIP backend"
+    default y
+    depends on MAGNOLIA_NET_ENABLE
+    help
+        Use ESP-IDF's lwIP stack for IPv4/TCP/UDP functionality.
+
+config MAGNOLIA_NET_USE_ETH
+    bool "Enable Ethernet netdev"
+    default y
+    depends on MAGNOLIA_NET_ENABLE
+    help
+        Bring up Ethernet using esp_eth and esp_netif glue.
+
+config MAGNOLIA_NET_USE_WIFI
+    bool "Enable Wi-Fi netdev"
+    default n
+    depends on MAGNOLIA_NET_ENABLE && ESP_WIFI_ENABLED
+    help
+        Bring up Wi-Fi STA mode using esp_wifi and esp_netif glue.
+
+config MAGNOLIA_NET_WIFI_SSID
+    string "Wi-Fi SSID"
+    default ""
+    depends on MAGNOLIA_NET_USE_WIFI
+    help
+        SSID for Wi-Fi STA connection. Leave empty to disable Wi-Fi bring-up.
+
+config MAGNOLIA_NET_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default ""
+    depends on MAGNOLIA_NET_USE_WIFI
+    help
+        Password for Wi-Fi STA connection.
+
+config MAGNOLIA_NET_DHCP
+    bool "Use DHCP"
+    default y
+    depends on MAGNOLIA_NET_ENABLE
+    help
+        Use DHCP to obtain IPv4 configuration for the default netdev.
+
+config MAGNOLIA_NET_STATIC_IP
+    string "Static IPv4 address"
+    default ""
+    depends on MAGNOLIA_NET_ENABLE
+    help
+        Static IPv4 address (e.g. 192.168.1.50). Used when DHCP is disabled.
+
+config MAGNOLIA_NET_STATIC_MASK
+    string "Static IPv4 netmask"
+    default ""
+    depends on MAGNOLIA_NET_ENABLE
+    help
+        Static IPv4 netmask (e.g. 255.255.255.0). Used when DHCP is disabled.
+
+config MAGNOLIA_NET_STATIC_GW
+    string "Static IPv4 gateway"
+    default ""
+    depends on MAGNOLIA_NET_ENABLE
+    help
+        Static IPv4 gateway (e.g. 192.168.1.1). Used when DHCP is disabled.
+
+config MAGNOLIA_NET_LOG_LEVEL
+    int "Network log level"
+    range 0 5
+    default 3
+    depends on MAGNOLIA_NET_ENABLE
+    help
+        ESP_LOG level for the Magnolia network subsystem (0=NONE..5=VERBOSE).
+
+config MAGNOLIA_NETD_STACK_DEPTH
+    int "netd job stack depth"
+    range 2048 65536
+    default 4096
+    depends on MAGNOLIA_NET_ENABLE
+    help
+        Stack depth for the netd job worker.
+
+endmenu

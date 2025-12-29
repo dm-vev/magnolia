@@ -109,6 +109,11 @@ struct m_vfs_fs_ops {
     m_vfs_error_t (*rmdir)(struct m_vfs_mount *mount,
                            struct m_vfs_node *parent,
                            const char *name);
+    m_vfs_error_t (*rename)(struct m_vfs_mount *mount,
+                            struct m_vfs_node *old_parent,
+                            const char *old_name,
+                            struct m_vfs_node *new_parent,
+                            const char *new_name);
     m_vfs_error_t (*open)(struct m_vfs_node *node,
                           int flags,
                           struct m_vfs_file **out_file);

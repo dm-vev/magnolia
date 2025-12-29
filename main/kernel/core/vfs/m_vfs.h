@@ -99,6 +99,9 @@ m_vfs_error_t m_vfs_unlink(m_job_id_t job,
 m_vfs_error_t m_vfs_mkdir(m_job_id_t job,
                            const char *path,
                            uint32_t mode);
+m_vfs_error_t m_vfs_rename(m_job_id_t job,
+                           const char *old_path,
+                           const char *new_path);
 
 m_vfs_error_t m_vfs_chdir(m_job_id_t job, const char *path);
 m_vfs_error_t m_vfs_getcwd(m_job_id_t job, char *buffer, size_t size);

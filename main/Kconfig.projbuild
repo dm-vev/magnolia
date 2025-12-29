@@ -9,6 +9,7 @@ menu "MagnoliaOS Configuration"
 source "$srctree/main/kernel/core/sched/Kconfig.sched"
 source "$srctree/main/kernel/core/timer/Kconfig.timer"
 source "$srctree/main/kernel/core/memory/Kconfig.memory"
+source "$srctree/main/kernel/core/net/Kconfig.net"
 
 source "$srctree/main/kernel/core/elf/Kconfig.elf"
 source "$srctree/main/kernel/core/job/Kconfig.job"

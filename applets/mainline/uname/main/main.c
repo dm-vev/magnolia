@@ -9,8 +9,6 @@
 
 #include "sdkconfig.h"
 
-static const char *g_version = "Magnolia coreutils 0.1";
-
 static void eprintf(const char *fmt, ...)
 {
     char buf[256];
@@ -28,11 +26,6 @@ static void eprintf(const char *fmt, ...)
     (void)write(STDERR_FILENO, buf, len);
 }
 
-static bool streq(const char *a, const char *b)
-{
-    return a && b && strcmp(a, b) == 0;
-}
-
 typedef struct {
     bool sysname;
     bool nodename;
@@ -40,8 +33,6 @@ typedef struct {
     bool version;
     bool machine;
     bool processor;
-    bool hw_platform;
-    bool operating_system;
 } uname_opts_t;
 
 static const char *uname_sysname(void)
@@ -51,6 +42,7 @@ static const char *uname_sysname(void)
 
 static const char *uname_nodename(void)
 {
+    /* Fall back to environment hints for minimal environments without hostname APIs. */
     const char *v = getenv("HOSTNAME");
     if (v && v[0] != '\0') {
         return v;
@@ -69,23 +61,10 @@ static const char *uname_release(void)
 
 static const char *uname_version(void)
 {
-    return __DATE__ " " __TIME__;
-}
-
-static const char *uname_machine(void)
-{
-#if defined(CONFIG_IDF_TARGET)
-    return CONFIG_IDF_TARGET;
-#elif defined(__XTENSA__)
-    return "xtensa";
-#elif defined(__riscv) || defined(__riscv__)
-    return "riscv";
-#else
     return "unknown";
-#endif
 }
 
-static const char *uname_processor(void)
+static const char *uname_arch(void)
 {
 #if defined(CONFIG_IDF_TARGET_ARCH)
     return CONFIG_IDF_TARGET_ARCH;
@@ -98,35 +77,14 @@ static const char *uname_processor(void)
 #endif
 }
 
-static const char *uname_hw_platform(void)
+static const char *uname_machine(void)
 {
-    return uname_machine();
+    return uname_arch();
 }
 
-static const char *uname_operating_system(void)
+static const char *uname_processor(void)
 {
-    return "Magnolia";
-}
-
-static void print_help(void)
-{
-    printf("usage: uname [OPTION]...\n");
-    printf("  -a  print all information\n");
-    printf("  -s  print the kernel name\n");
-    printf("  -n  print the network node hostname\n");
-    printf("  -r  print the kernel release\n");
-    printf("  -v  print the kernel version\n");
-    printf("  -m  print the machine hardware name\n");
-    printf("  -p  print the processor type\n");
-    printf("  -i  print the hardware platform\n");
-    printf("  -o  print the operating system\n");
-    printf("      --help     display this help and exit\n");
-    printf("      --version  output version information and exit\n");
-}
-
-static void print_version(void)
-{
-    printf("uname (%s)\n", g_version);
+    return uname_arch();
 }
 
 static void select_all(uname_opts_t *opts)
@@ -136,15 +94,12 @@ static void select_all(uname_opts_t *opts)
     opts->release = true;
     opts->version = true;
     opts->machine = true;
-    opts->processor = true;
-    opts->hw_platform = true;
-    opts->operating_system = true;
 }
 
 static bool any_selected(const uname_opts_t *opts)
 {
     return opts->sysname || opts->nodename || opts->release || opts->version || opts->machine
-           || opts->processor || opts->hw_platform || opts->operating_system;
+           || opts->processor;
 }
 
 static int uname_print(const uname_opts_t *opts)
@@ -170,12 +125,6 @@ static int uname_print(const uname_opts_t *opts)
     if (opts->processor) {
         fields[n++] = uname_processor();
     }
-    if (opts->hw_platform) {
-        fields[n++] = uname_hw_platform();
-    }
-    if (opts->operating_system) {
-        fields[n++] = uname_operating_system();
-    }
 
     for (int i = 0; i < n; ++i) {
         if (i != 0) {
@@ -189,21 +138,11 @@ static int uname_print(const uname_opts_t *opts)
 
 int main(int argc, char **argv)
 {
-    for (int i = 1; i < argc; ++i) {
-        if (streq(argv[i], "--help")) {
-            print_help();
-            return 0;
-        }
-        if (streq(argv[i], "--version")) {
-            print_version();
-            return 0;
-        }
-    }
-
     uname_opts_t opts = {0};
 
     int opt;
-    while ((opt = getopt(argc, argv, "asnrvmpio")) != -1) {
+    opterr = 0;
+    while ((opt = getopt(argc, argv, "amnprsv")) != -1) {
         switch (opt) {
         case 'a':
             select_all(&opts);
@@ -226,20 +165,16 @@ int main(int argc, char **argv)
         case 'p':
             opts.processor = true;
             break;
-        case 'i':
-            opts.hw_platform = true;
-            break;
-        case 'o':
-            opts.operating_system = true;
-            break;
         default:
-            eprintf("usage: uname [-asnrvmpio] [-a]\n");
+            eprintf("uname: illegal option -- %c\n", optopt);
+            eprintf("usage: uname [-amnprsv]\n");
             return 1;
         }
     }
 
     if (optind < argc) {
         eprintf("uname: extra operand: %s\n", argv[optind] ? argv[optind] : "");
+        eprintf("usage: uname [-amnprsv]\n");
         return 1;
     }
 

@@ -69,12 +69,9 @@ static char *join_path(const char *dir, const char *name)
 
 static int rm_path(const char *path, bool recursive, bool force, bool interactive, int *failed)
 {
-    if (interactive && !confirm_remove(path)) {
-        return 0;
-    }
-
     struct stat st;
-    if (stat(path, &st) != 0) {
+    /* Use lstat so we never follow symlinks when deciding to recurse. */
+    if (lstat(path, &st) != 0) {
         if (force && errno == ENOENT) {
             return 0;
         }
@@ -88,6 +85,9 @@ static int rm_path(const char *path, bool recursive, bool force, bool interactiv
             eprintf("rm: %s: is a directory\n", path);
             *failed = 1;
             return -1;
+        }
+        if (interactive && !confirm_remove(path)) {
+            return 0;
         }
 
         DIR *dir = opendir(path);
@@ -112,9 +112,23 @@ static int rm_path(const char *path, bool recursive, bool force, bool interactiv
             free(child);
         }
         (void)closedir(dir);
+
+        if (rmdir(path) != 0) {
+            if (force && errno == ENOENT) {
+                return 0;
+            }
+            eprintf("rm: %s: %s\n", path, strerror(errno));
+            *failed = 1;
+            return -1;
+        }
+        return 0;
     }
 
-    if (remove(path) != 0) {
+    if (interactive && !confirm_remove(path)) {
+        return 0;
+    }
+
+    if (unlink(path) != 0) {
         if (force && errno == ENOENT) {
             return 0;
         }

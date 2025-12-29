@@ -457,6 +457,63 @@ _ramfs_readdir(m_vfs_file_t *dir,
 }
 
 static m_vfs_error_t
+_ramfs_rename(m_vfs_mount_t *mount,
+              m_vfs_node_t *old_parent,
+              const char *old_name,
+              m_vfs_node_t *new_parent,
+              const char *new_name)
+{
+    (void)mount;
+    if (old_parent == NULL || new_parent == NULL ||
+            old_name == NULL || new_name == NULL) {
+        return M_VFS_ERR_INVALID_PARAM;
+    }
+
+    ramfs_node_data_t *old_parent_data = _ramfs_node_from_vnode(old_parent);
+    ramfs_node_data_t *new_parent_data = _ramfs_node_from_vnode(new_parent);
+    if (old_parent_data == NULL || new_parent_data == NULL ||
+            old_parent_data->type != M_VFS_NODE_TYPE_DIRECTORY ||
+            new_parent_data->type != M_VFS_NODE_TYPE_DIRECTORY) {
+        return M_VFS_ERR_INVALID_PARAM;
+    }
+
+    ramfs_node_data_t *node = NULL;
+    ramfs_node_data_t *existing = NULL;
+
+    portENTER_CRITICAL(&g_ramfs_lock);
+    node = _ramfs_find_child(old_parent_data, old_name);
+    if (node == NULL) {
+        portEXIT_CRITICAL(&g_ramfs_lock);
+        return M_VFS_ERR_NOT_FOUND;
+    }
+
+    existing = _ramfs_find_child(new_parent_data, new_name);
+    if (existing != NULL && existing->type == M_VFS_NODE_TYPE_DIRECTORY &&
+            existing->children != NULL) {
+        portEXIT_CRITICAL(&g_ramfs_lock);
+        return M_VFS_ERR_BUSY;
+    }
+
+    if (existing != NULL) {
+        _ramfs_remove_child(new_parent_data, existing);
+    }
+
+    if (old_parent_data != new_parent_data) {
+        _ramfs_remove_child(old_parent_data, node);
+        _ramfs_add_child(new_parent_data, node);
+    }
+
+    strncpy(node->name, new_name, M_VFS_NAME_MAX_LEN);
+    node->name[M_VFS_NAME_MAX_LEN - 1] = '\0';
+    portEXIT_CRITICAL(&g_ramfs_lock);
+
+    if (existing != NULL) {
+        m_vfs_node_release(existing->vnode);
+    }
+    return M_VFS_ERR_OK;
+}
+
+static m_vfs_error_t
 _ramfs_getattr(m_vfs_node_t *node,
                m_vfs_stat_t *stat)
 {
@@ -507,6 +564,7 @@ static const struct m_vfs_fs_ops g_ramfs_ops = {
     .mkdir = _ramfs_mkdir,
     .unlink = _ramfs_unlink,
     .rmdir = _ramfs_unlink,
+    .rename = _ramfs_rename,
     .open = _ramfs_open,
     .close = NULL,
     .read = _ramfs_read,

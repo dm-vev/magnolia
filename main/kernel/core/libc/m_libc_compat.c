@@ -16,6 +16,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "esp_log.h"
 #include "esp_rom_sys.h"
 #include "esp_rom_serial_output.h"
 #include "driver/usb_serial_jtag.h"
@@ -31,6 +32,14 @@
 #include "kernel/core/vfs/m_vfs.h"
 #include "kernel/core/vfs/fd/m_vfs_fd.h"
 #include "kernel/core/vfs/core/m_vfs_object.h"
+
+#if CONFIG_MAGNOLIA_NET_ENABLE && CONFIG_MAGNOLIA_NET_BACKEND_LWIP
+#include "lwip/inet.h"
+#include "lwip/sockets.h"
+#include "kernel/core/net/m_net.h"
+#include "kernel/core/net/m_net_errno.h"
+#include "kernel/core/net/m_net_lwip.h"
+#endif
 
 #define LIBC_ERRNO_TLS_SLOT 0u
 #define LIBC_EXIT_TLS_SLOT  1u
@@ -71,6 +80,48 @@ static void libc_set_errno(int value)
         *slot = value;
     }
 }
+
+#if CONFIG_MAGNOLIA_NET_ENABLE && CONFIG_MAGNOLIA_NET_BACKEND_LWIP
+static bool libc_fd_is_lwip_socket(int fd)
+{
+    return (fd >= LWIP_SOCKET_OFFSET) &&
+           (fd < (LWIP_SOCKET_OFFSET + CONFIG_LWIP_MAX_SOCKETS));
+}
+
+static int libc_socket_error(void)
+{
+    return m_net_errno_from_lwip_errno(errno);
+}
+
+static void libc_socket_log_error(const char *op, int fd, int lwip_errno, int err)
+{
+    if (op == NULL) {
+        op = "unknown";
+    }
+    job_ctx_t *ctx = jctx_current();
+    const char *suffix = m_net_errno_is_timeout(err) ? " timeout" : "";
+    ESP_LOGW("NET",
+             "[NET] sock job=%p fd=%d op=%s%s lwip_errno=%d errno=%d",
+             ctx ? ctx->job_id : NULL,
+             fd,
+             op,
+             suffix,
+             lwip_errno,
+             err);
+}
+
+static bool libc_socket_flags_allowed(const char *op, int fd, int flags)
+{
+#if defined(MSG_DONTWAIT)
+    if ((flags & MSG_DONTWAIT) != 0) {
+        libc_set_errno(ENOTSUP);
+        libc_socket_log_error(op, fd, 0, ENOTSUP);
+        return false;
+    }
+#endif
+    return true;
+}
+#endif
 
 static m_libc_exit_frame_t *libc_exit_frame_get(void)
 {
@@ -425,6 +476,21 @@ int m_libc_close(int fd)
     if (fd >= 0 && fd <= 2) {
         return 0;
     }
+#if CONFIG_MAGNOLIA_NET_ENABLE && CONFIG_MAGNOLIA_NET_BACKEND_LWIP
+    if (libc_fd_is_lwip_socket(fd)) {
+        if (!m_net_lwip_socket_owned(fd)) {
+            libc_set_errno(EBADF);
+            libc_socket_log_error("close", fd, 0, EBADF);
+            return -1;
+        }
+        int err = m_net_lwip_socket_close(fd, false);
+        if (err != 0) {
+            libc_set_errno(err);
+            return -1;
+        }
+        return 0;
+    }
+#endif
     m_vfs_error_t err = m_vfs_close(libc_job_id(), fd);
     if (err != M_VFS_ERR_OK) {
         libc_set_errno(libc_errno_from_vfs_error(err));
@@ -435,6 +501,33 @@ int m_libc_close(int fd)
 
 ssize_t m_libc_read(int fd, void *buffer, size_t size)
 {
+#if CONFIG_MAGNOLIA_NET_ENABLE && CONFIG_MAGNOLIA_NET_BACKEND_LWIP
+    if (libc_fd_is_lwip_socket(fd)) {
+        if (xPortInIsrContext()) {
+            libc_set_errno(EPERM);
+            libc_socket_log_error("read", fd, 0, EPERM);
+            return -1;
+        }
+        if (!m_net_lwip_socket_owned(fd)) {
+            libc_set_errno(EBADF);
+            libc_socket_log_error("read", fd, 0, EBADF);
+            return -1;
+        }
+        ssize_t rc = lwip_read(fd, buffer, size);
+        if (rc < 0) {
+            int lwip_errno = errno;
+            int err = m_net_errno_from_lwip_errno(lwip_errno);
+            libc_set_errno(err);
+            libc_socket_log_error("read", fd, lwip_errno, err);
+            m_net_stats_record_error(false);
+            return -1;
+        }
+        if (rc > 0) {
+            m_net_stats_record_rx((size_t)rc);
+        }
+        return rc;
+    }
+#endif
     if (fd >= 0 && fd <= 2) {
         if (m_vfs_fd_lookup(libc_job_id(), fd) != NULL) {
             goto vfs_read;
@@ -509,6 +602,33 @@ vfs_read:
 
 ssize_t m_libc_write(int fd, const void *buffer, size_t size)
 {
+#if CONFIG_MAGNOLIA_NET_ENABLE && CONFIG_MAGNOLIA_NET_BACKEND_LWIP
+    if (libc_fd_is_lwip_socket(fd)) {
+        if (xPortInIsrContext()) {
+            libc_set_errno(EPERM);
+            libc_socket_log_error("write", fd, 0, EPERM);
+            return -1;
+        }
+        if (!m_net_lwip_socket_owned(fd)) {
+            libc_set_errno(EBADF);
+            libc_socket_log_error("write", fd, 0, EBADF);
+            return -1;
+        }
+        ssize_t rc = lwip_write(fd, buffer, size);
+        if (rc < 0) {
+            int lwip_errno = errno;
+            int err = m_net_errno_from_lwip_errno(lwip_errno);
+            libc_set_errno(err);
+            libc_socket_log_error("write", fd, lwip_errno, err);
+            m_net_stats_record_error(true);
+            return -1;
+        }
+        if (rc > 0) {
+            m_net_stats_record_tx((size_t)rc);
+        }
+        return rc;
+    }
+#endif
     if (fd == 1 || fd == 2) {
         if (m_vfs_fd_lookup(libc_job_id(), fd) == NULL) {
             return libc_console_write(buffer, size);
@@ -527,6 +647,536 @@ ssize_t m_libc_write(int fd, const void *buffer, size_t size)
     }
     return (ssize_t)written;
 }
+
+#if CONFIG_MAGNOLIA_NET_ENABLE && CONFIG_MAGNOLIA_NET_BACKEND_LWIP
+int m_libc_socket(int domain, int type, int protocol)
+{
+    if (xPortInIsrContext()) {
+        libc_set_errno(EPERM);
+        libc_socket_log_error("socket", -1, 0, EPERM);
+        return -1;
+    }
+#if defined(SOCK_NONBLOCK)
+    if ((type & SOCK_NONBLOCK) != 0) {
+        libc_set_errno(ENOTSUP);
+        libc_socket_log_error("socket", -1, 0, ENOTSUP);
+        return -1;
+    }
+#endif
+
+    int fd = lwip_socket(domain, type, protocol);
+    if (fd < 0) {
+        int lwip_errno = errno;
+        int err = m_net_errno_from_lwip_errno(lwip_errno);
+        libc_set_errno(err);
+        libc_socket_log_error("socket", fd, lwip_errno, err);
+        return -1;
+    }
+    if (!m_net_lwip_socket_track_add(fd)) {
+        (void)lwip_close(fd);
+        libc_set_errno(EMFILE);
+        libc_socket_log_error("socket", fd, 0, EMFILE);
+        return -1;
+    }
+    return fd;
+}
+
+int m_libc_connect(int sockfd, const void *addr, socklen_t addrlen)
+{
+    if (xPortInIsrContext()) {
+        libc_set_errno(EPERM);
+        libc_socket_log_error("connect", sockfd, 0, EPERM);
+        return -1;
+    }
+    if (addr == NULL || addrlen == 0) {
+        libc_set_errno(EINVAL);
+        libc_socket_log_error("connect", sockfd, 0, EINVAL);
+        return -1;
+    }
+    if (!m_net_lwip_socket_owned(sockfd)) {
+        libc_set_errno(EBADF);
+        libc_socket_log_error("connect", sockfd, 0, EBADF);
+        return -1;
+    }
+
+    int rc = lwip_connect(sockfd, (const struct sockaddr *)addr, addrlen);
+    if (rc < 0) {
+        int lwip_errno = errno;
+        int err = m_net_errno_from_lwip_errno(lwip_errno);
+        libc_set_errno(err);
+        libc_socket_log_error("connect", sockfd, lwip_errno, err);
+        m_net_stats_record_error(true);
+        return -1;
+    }
+
+    if (((const struct sockaddr *)addr)->sa_family == AF_INET) {
+        const struct sockaddr_in *in = (const struct sockaddr_in *)addr;
+        char ip_buf[16];
+        inet_ntop(AF_INET, &in->sin_addr, ip_buf, sizeof(ip_buf));
+        ESP_LOGI("NET", "[NET] sock fd=%d connect %s:%u -> OK", sockfd, ip_buf, (unsigned)ntohs(in->sin_port));
+    }
+    return rc;
+}
+
+int m_libc_bind(int sockfd, const void *addr, socklen_t addrlen)
+{
+    if (xPortInIsrContext()) {
+        libc_set_errno(EPERM);
+        libc_socket_log_error("bind", sockfd, 0, EPERM);
+        return -1;
+    }
+    if (addr == NULL || addrlen == 0) {
+        libc_set_errno(EINVAL);
+        libc_socket_log_error("bind", sockfd, 0, EINVAL);
+        return -1;
+    }
+    if (!m_net_lwip_socket_owned(sockfd)) {
+        libc_set_errno(EBADF);
+        libc_socket_log_error("bind", sockfd, 0, EBADF);
+        return -1;
+    }
+
+    int rc = lwip_bind(sockfd, (const struct sockaddr *)addr, addrlen);
+    if (rc < 0) {
+        int lwip_errno = errno;
+        int err = m_net_errno_from_lwip_errno(lwip_errno);
+        libc_set_errno(err);
+        libc_socket_log_error("bind", sockfd, lwip_errno, err);
+        m_net_stats_record_error(true);
+        return -1;
+    }
+    return rc;
+}
+
+int m_libc_listen(int sockfd, int backlog)
+{
+    if (xPortInIsrContext()) {
+        libc_set_errno(EPERM);
+        libc_socket_log_error("listen", sockfd, 0, EPERM);
+        return -1;
+    }
+    if (!m_net_lwip_socket_owned(sockfd)) {
+        libc_set_errno(EBADF);
+        libc_socket_log_error("listen", sockfd, 0, EBADF);
+        return -1;
+    }
+
+    int rc = lwip_listen(sockfd, backlog);
+    if (rc < 0) {
+        int lwip_errno = errno;
+        int err = m_net_errno_from_lwip_errno(lwip_errno);
+        libc_set_errno(err);
+        libc_socket_log_error("listen", sockfd, lwip_errno, err);
+        m_net_stats_record_error(true);
+        return -1;
+    }
+    return rc;
+}
+
+int m_libc_accept(int sockfd, void *addr, socklen_t *addrlen)
+{
+    if (xPortInIsrContext()) {
+        libc_set_errno(EPERM);
+        libc_socket_log_error("accept", sockfd, 0, EPERM);
+        return -1;
+    }
+    if (!m_net_lwip_socket_owned(sockfd)) {
+        libc_set_errno(EBADF);
+        libc_socket_log_error("accept", sockfd, 0, EBADF);
+        return -1;
+    }
+
+    int rc = lwip_accept(sockfd, (struct sockaddr *)addr, addrlen);
+    if (rc < 0) {
+        int lwip_errno = errno;
+        int err = m_net_errno_from_lwip_errno(lwip_errno);
+        libc_set_errno(err);
+        libc_socket_log_error("accept", sockfd, lwip_errno, err);
+        m_net_stats_record_error(false);
+        return -1;
+    }
+    if (!m_net_lwip_socket_track_add(rc)) {
+        (void)lwip_close(rc);
+        libc_set_errno(EMFILE);
+        libc_socket_log_error("accept", sockfd, 0, EMFILE);
+        return -1;
+    }
+    return rc;
+}
+
+ssize_t m_libc_send(int sockfd, const void *buf, size_t len, int flags)
+{
+    if (xPortInIsrContext()) {
+        libc_set_errno(EPERM);
+        libc_socket_log_error("send", sockfd, 0, EPERM);
+        return -1;
+    }
+    if (buf == NULL && len != 0) {
+        libc_set_errno(EINVAL);
+        libc_socket_log_error("send", sockfd, 0, EINVAL);
+        return -1;
+    }
+    if (!m_net_lwip_socket_owned(sockfd)) {
+        libc_set_errno(EBADF);
+        libc_socket_log_error("send", sockfd, 0, EBADF);
+        return -1;
+    }
+    if (!libc_socket_flags_allowed("send", sockfd, flags)) {
+        return -1;
+    }
+
+    ssize_t rc = lwip_send(sockfd, buf, len, flags);
+    if (rc < 0) {
+        int lwip_errno = errno;
+        int err = m_net_errno_from_lwip_errno(lwip_errno);
+        libc_set_errno(err);
+        libc_socket_log_error("send", sockfd, lwip_errno, err);
+        m_net_stats_record_error(true);
+        return -1;
+    }
+    if (rc > 0) {
+        m_net_stats_record_tx((size_t)rc);
+    }
+    return rc;
+}
+
+ssize_t m_libc_recv(int sockfd, void *buf, size_t len, int flags)
+{
+    if (xPortInIsrContext()) {
+        libc_set_errno(EPERM);
+        libc_socket_log_error("recv", sockfd, 0, EPERM);
+        return -1;
+    }
+    if (buf == NULL && len != 0) {
+        libc_set_errno(EINVAL);
+        libc_socket_log_error("recv", sockfd, 0, EINVAL);
+        return -1;
+    }
+    if (!m_net_lwip_socket_owned(sockfd)) {
+        libc_set_errno(EBADF);
+        libc_socket_log_error("recv", sockfd, 0, EBADF);
+        return -1;
+    }
+    if (!libc_socket_flags_allowed("recv", sockfd, flags)) {
+        return -1;
+    }
+
+    ssize_t rc = lwip_recv(sockfd, buf, len, flags);
+    if (rc < 0) {
+        int lwip_errno = errno;
+        int err = m_net_errno_from_lwip_errno(lwip_errno);
+        libc_set_errno(err);
+        libc_socket_log_error("recv", sockfd, lwip_errno, err);
+        m_net_stats_record_error(false);
+        return -1;
+    }
+    if (rc > 0) {
+        m_net_stats_record_rx((size_t)rc);
+    }
+    return rc;
+}
+
+ssize_t m_libc_sendto(int sockfd,
+                      const void *buf,
+                      size_t len,
+                      int flags,
+                      const void *dest_addr,
+                      socklen_t addrlen)
+{
+    if (xPortInIsrContext()) {
+        libc_set_errno(EPERM);
+        libc_socket_log_error("sendto", sockfd, 0, EPERM);
+        return -1;
+    }
+    if (buf == NULL && len != 0) {
+        libc_set_errno(EINVAL);
+        libc_socket_log_error("sendto", sockfd, 0, EINVAL);
+        return -1;
+    }
+    if (!m_net_lwip_socket_owned(sockfd)) {
+        libc_set_errno(EBADF);
+        libc_socket_log_error("sendto", sockfd, 0, EBADF);
+        return -1;
+    }
+    if (!libc_socket_flags_allowed("sendto", sockfd, flags)) {
+        return -1;
+    }
+
+    ssize_t rc = lwip_sendto(sockfd, buf, len, flags,
+                             (const struct sockaddr *)dest_addr, addrlen);
+    if (rc < 0) {
+        int lwip_errno = errno;
+        int err = m_net_errno_from_lwip_errno(lwip_errno);
+        libc_set_errno(err);
+        libc_socket_log_error("sendto", sockfd, lwip_errno, err);
+        m_net_stats_record_error(true);
+        return -1;
+    }
+    if (rc > 0) {
+        m_net_stats_record_tx((size_t)rc);
+    }
+    return rc;
+}
+
+ssize_t m_libc_recvfrom(int sockfd,
+                        void *buf,
+                        size_t len,
+                        int flags,
+                        void *src_addr,
+                        socklen_t *addrlen)
+{
+    if (xPortInIsrContext()) {
+        libc_set_errno(EPERM);
+        libc_socket_log_error("recvfrom", sockfd, 0, EPERM);
+        return -1;
+    }
+    if (buf == NULL && len != 0) {
+        libc_set_errno(EINVAL);
+        libc_socket_log_error("recvfrom", sockfd, 0, EINVAL);
+        return -1;
+    }
+    if (!m_net_lwip_socket_owned(sockfd)) {
+        libc_set_errno(EBADF);
+        libc_socket_log_error("recvfrom", sockfd, 0, EBADF);
+        return -1;
+    }
+    if (!libc_socket_flags_allowed("recvfrom", sockfd, flags)) {
+        return -1;
+    }
+
+    ssize_t rc = lwip_recvfrom(sockfd, buf, len, flags,
+                               (struct sockaddr *)src_addr, addrlen);
+    if (rc < 0) {
+        int lwip_errno = errno;
+        int err = m_net_errno_from_lwip_errno(lwip_errno);
+        libc_set_errno(err);
+        libc_socket_log_error("recvfrom", sockfd, lwip_errno, err);
+        m_net_stats_record_error(false);
+        return -1;
+    }
+    if (rc > 0) {
+        m_net_stats_record_rx((size_t)rc);
+    }
+    return rc;
+}
+
+int m_libc_shutdown(int sockfd, int how)
+{
+    if (xPortInIsrContext()) {
+        libc_set_errno(EPERM);
+        libc_socket_log_error("shutdown", sockfd, 0, EPERM);
+        return -1;
+    }
+    if (!m_net_lwip_socket_owned(sockfd)) {
+        libc_set_errno(EBADF);
+        libc_socket_log_error("shutdown", sockfd, 0, EBADF);
+        return -1;
+    }
+
+    int rc = lwip_shutdown(sockfd, how);
+    if (rc < 0) {
+        int lwip_errno = errno;
+        int err = m_net_errno_from_lwip_errno(lwip_errno);
+        libc_set_errno(err);
+        libc_socket_log_error("shutdown", sockfd, lwip_errno, err);
+        m_net_stats_record_error(true);
+        return -1;
+    }
+    return rc;
+}
+
+int m_libc_setsockopt(int sockfd,
+                      int level,
+                      int optname,
+                      const void *optval,
+                      socklen_t optlen)
+{
+    if (xPortInIsrContext()) {
+        libc_set_errno(EPERM);
+        libc_socket_log_error("setsockopt", sockfd, 0, EPERM);
+        return -1;
+    }
+    if (!m_net_lwip_socket_owned(sockfd)) {
+        libc_set_errno(EBADF);
+        libc_socket_log_error("setsockopt", sockfd, 0, EBADF);
+        return -1;
+    }
+
+    int rc = lwip_setsockopt(sockfd, level, optname, optval, optlen);
+    if (rc < 0) {
+        int lwip_errno = errno;
+        int err = m_net_errno_from_lwip_errno(lwip_errno);
+        libc_set_errno(err);
+        libc_socket_log_error("setsockopt", sockfd, lwip_errno, err);
+        return -1;
+    }
+    return rc;
+}
+
+int m_libc_getsockopt(int sockfd,
+                      int level,
+                      int optname,
+                      void *optval,
+                      socklen_t *optlen)
+{
+    if (xPortInIsrContext()) {
+        libc_set_errno(EPERM);
+        libc_socket_log_error("getsockopt", sockfd, 0, EPERM);
+        return -1;
+    }
+    if (!m_net_lwip_socket_owned(sockfd)) {
+        libc_set_errno(EBADF);
+        libc_socket_log_error("getsockopt", sockfd, 0, EBADF);
+        return -1;
+    }
+
+    int rc = lwip_getsockopt(sockfd, level, optname, optval, optlen);
+    if (rc < 0) {
+        int lwip_errno = errno;
+        int err = m_net_errno_from_lwip_errno(lwip_errno);
+        libc_set_errno(err);
+        libc_socket_log_error("getsockopt", sockfd, lwip_errno, err);
+        return -1;
+    }
+    return rc;
+}
+#else
+int m_libc_socket(int domain, int type, int protocol)
+{
+    (void)domain;
+    (void)type;
+    (void)protocol;
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
+int m_libc_connect(int sockfd, const void *addr, socklen_t addrlen)
+{
+    (void)sockfd;
+    (void)addr;
+    (void)addrlen;
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
+int m_libc_bind(int sockfd, const void *addr, socklen_t addrlen)
+{
+    (void)sockfd;
+    (void)addr;
+    (void)addrlen;
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
+int m_libc_listen(int sockfd, int backlog)
+{
+    (void)sockfd;
+    (void)backlog;
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
+int m_libc_accept(int sockfd, void *addr, socklen_t *addrlen)
+{
+    (void)sockfd;
+    (void)addr;
+    (void)addrlen;
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
+ssize_t m_libc_send(int sockfd, const void *buf, size_t len, int flags)
+{
+    (void)sockfd;
+    (void)buf;
+    (void)len;
+    (void)flags;
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
+ssize_t m_libc_recv(int sockfd, void *buf, size_t len, int flags)
+{
+    (void)sockfd;
+    (void)buf;
+    (void)len;
+    (void)flags;
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
+ssize_t m_libc_sendto(int sockfd,
+                      const void *buf,
+                      size_t len,
+                      int flags,
+                      const void *dest_addr,
+                      socklen_t addrlen)
+{
+    (void)sockfd;
+    (void)buf;
+    (void)len;
+    (void)flags;
+    (void)dest_addr;
+    (void)addrlen;
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
+ssize_t m_libc_recvfrom(int sockfd,
+                        void *buf,
+                        size_t len,
+                        int flags,
+                        void *src_addr,
+                        socklen_t *addrlen)
+{
+    (void)sockfd;
+    (void)buf;
+    (void)len;
+    (void)flags;
+    (void)src_addr;
+    (void)addrlen;
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
+int m_libc_shutdown(int sockfd, int how)
+{
+    (void)sockfd;
+    (void)how;
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
+int m_libc_setsockopt(int sockfd,
+                      int level,
+                      int optname,
+                      const void *optval,
+                      socklen_t optlen)
+{
+    (void)sockfd;
+    (void)level;
+    (void)optname;
+    (void)optval;
+    (void)optlen;
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
+int m_libc_getsockopt(int sockfd,
+                      int level,
+                      int optname,
+                      void *optval,
+                      socklen_t *optlen)
+{
+    (void)sockfd;
+    (void)level;
+    (void)optname;
+    (void)optval;
+    (void)optlen;
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+#endif
 
 static bool libc_file_getattr(m_vfs_file_t *file, m_vfs_stat_t *out)
 {
@@ -703,6 +1353,53 @@ int m_libc_poll(void *fds, unsigned long nfds, int timeout_ms)
         return 0;
     }
 
+#if CONFIG_MAGNOLIA_NET_ENABLE && CONFIG_MAGNOLIA_NET_BACKEND_LWIP
+    bool has_lwip = false;
+    bool has_vfs = false;
+    for (unsigned long i = 0; i < nfds; ++i) {
+        if (pfds[i].fd < 0) {
+            continue;
+        }
+        if (libc_fd_is_lwip_socket(pfds[i].fd)) {
+            has_lwip = true;
+        } else {
+            has_vfs = true;
+        }
+    }
+
+    if (has_lwip && has_vfs) {
+        libc_set_errno(ENOTSUP);
+        libc_socket_log_error("poll", -1, 0, ENOTSUP);
+        return -1;
+    }
+
+    if (has_lwip) {
+        if (xPortInIsrContext()) {
+            libc_set_errno(EPERM);
+            libc_socket_log_error("poll", -1, 0, EPERM);
+            return -1;
+        }
+        for (unsigned long i = 0; i < nfds; ++i) {
+            pfds[i].revents = 0;
+            if (pfds[i].fd >= 0 && !m_net_lwip_socket_owned(pfds[i].fd)) {
+                libc_set_errno(EBADF);
+                libc_socket_log_error("poll", pfds[i].fd, 0, EBADF);
+                return -1;
+            }
+        }
+
+        int rc = lwip_poll(pfds, (nfds_t)nfds, timeout_ms);
+        if (rc < 0) {
+            int lwip_errno = errno;
+            int err = m_net_errno_from_lwip_errno(lwip_errno);
+            libc_set_errno(err);
+            libc_socket_log_error("poll", -1, lwip_errno, err);
+            return -1;
+        }
+        return rc;
+    }
+#endif
+
     m_vfs_pollfd_t *vfds = (m_vfs_pollfd_t *)m_libc_malloc(nfds * sizeof(*vfds));
     if (vfds == NULL) {
         libc_set_errno(ENOMEM);
@@ -766,6 +1463,102 @@ int m_libc_poll(void *fds, unsigned long nfds, int timeout_ms)
     }
     m_libc_free(vfds);
     return ready_count;
+}
+
+int m_libc_select(int nfds,
+                  fd_set *readfds,
+                  fd_set *writefds,
+                  fd_set *exceptfds,
+                  struct timeval *timeout)
+{
+    if (nfds < 0) {
+        libc_set_errno(EINVAL);
+        return -1;
+    }
+
+#if CONFIG_MAGNOLIA_NET_ENABLE && CONFIG_MAGNOLIA_NET_BACKEND_LWIP
+    bool has_lwip = false;
+    bool has_vfs = false;
+    bool has_any = false;
+    for (int fd = 0; fd < nfds; ++fd) {
+        bool set = false;
+        if (readfds != NULL && FD_ISSET(fd, readfds)) {
+            set = true;
+        }
+        if (writefds != NULL && FD_ISSET(fd, writefds)) {
+            set = true;
+        }
+        if (exceptfds != NULL && FD_ISSET(fd, exceptfds)) {
+            set = true;
+        }
+        if (!set) {
+            continue;
+        }
+        has_any = true;
+        if (libc_fd_is_lwip_socket(fd)) {
+            has_lwip = true;
+        } else {
+            has_vfs = true;
+        }
+    }
+
+    if (has_lwip && has_vfs) {
+        libc_set_errno(ENOTSUP);
+        libc_socket_log_error("select", -1, 0, ENOTSUP);
+        return -1;
+    }
+
+    if (!has_any) {
+        if (timeout != NULL) {
+            uint64_t usec = ((uint64_t)timeout->tv_sec * 1000000ULL) + (uint64_t)timeout->tv_usec;
+            if (usec > 0) {
+                vTaskDelay(m_timer_delta_to_ticks(usec));
+            }
+            return 0;
+        }
+        libc_set_errno(EINVAL);
+        return -1;
+    }
+
+    if (has_lwip) {
+        if (xPortInIsrContext()) {
+            libc_set_errno(EPERM);
+            libc_socket_log_error("select", -1, 0, EPERM);
+            return -1;
+        }
+
+        for (int fd = 0; fd < nfds; ++fd) {
+            bool set = false;
+            if (readfds != NULL && FD_ISSET(fd, readfds)) {
+                set = true;
+            }
+            if (writefds != NULL && FD_ISSET(fd, writefds)) {
+                set = true;
+            }
+            if (exceptfds != NULL && FD_ISSET(fd, exceptfds)) {
+                set = true;
+            }
+            if (set && !m_net_lwip_socket_owned(fd)) {
+                libc_set_errno(EBADF);
+                libc_socket_log_error("select", fd, 0, EBADF);
+                return -1;
+            }
+        }
+
+        int rc = lwip_select(nfds, readfds, writefds, exceptfds, timeout);
+        if (rc < 0) {
+            int lwip_errno = errno;
+            int err = m_net_errno_from_lwip_errno(lwip_errno);
+            libc_set_errno(err);
+            libc_socket_log_error("select", -1, lwip_errno, err);
+            return -1;
+        }
+        return rc;
+    }
+#endif
+
+    libc_set_errno(ENOTSUP);
+    return -1;
 }
 
 int m_libc_isatty(int fd)
@@ -876,6 +1669,20 @@ char *m_libc_getcwd(char *buffer, size_t size)
         return NULL;
     }
     return buffer;
+}
+
+int m_libc_rename(const char *old, const char *newpath)
+{
+    if (old == NULL || newpath == NULL) {
+        libc_set_errno(EINVAL);
+        return -1;
+    }
+    m_vfs_error_t err = m_vfs_rename(libc_job_id(), old, newpath);
+    if (err != M_VFS_ERR_OK) {
+        libc_set_errno(libc_errno_from_vfs_error(err));
+        return -1;
+    }
+    return 0;
 }
 
 static void libc_fill_posix_stat(const m_vfs_stat_t *in, struct stat *out)
@@ -1390,10 +2197,16 @@ int m_libc_getpid_r(struct _reent *r)
 
 int m_libc_rename_r(struct _reent *r, const char *old, const char *newpath)
 {
-    (void)old;
-    (void)newpath;
-    libc_reent_set_errno(r, ENOSYS);
-    return -1;
+    if (old == NULL || newpath == NULL) {
+        libc_reent_set_errno(r, EINVAL);
+        return -1;
+    }
+    m_vfs_error_t err = m_vfs_rename(libc_job_id(), old, newpath);
+    if (err != M_VFS_ERR_OK) {
+        libc_reent_set_errno(r, libc_errno_from_vfs_error(err));
+        return -1;
+    }
+    return 0;
 }
 
 int m_libc_link_r(struct _reent *r, const char *old, const char *newpath)

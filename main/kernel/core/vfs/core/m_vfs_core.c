@@ -1152,6 +1152,81 @@ m_vfs_mkdir(m_job_id_t job,
 }
 
 m_vfs_error_t
+m_vfs_rename(m_job_id_t job,
+             const char *old_path,
+             const char *new_path)
+{
+    if (old_path == NULL || new_path == NULL) {
+        return _m_vfs_record_result(M_VFS_ERR_INVALID_PARAM);
+    }
+
+    if (strcmp(old_path, new_path) == 0) {
+        return _m_vfs_record_result(M_VFS_ERR_OK);
+    }
+
+    if (_m_vfs_should_inject(NULL)) {
+        return _m_vfs_record_result(M_VFS_ERR_BUSY);
+    }
+
+    m_vfs_path_t old_parsed;
+    m_vfs_error_t err = _m_vfs_parse_user_path(job, old_path, &old_parsed);
+    if (err != M_VFS_ERR_OK) {
+        return _m_vfs_record_result(err);
+    }
+
+    m_vfs_path_t new_parsed;
+    err = _m_vfs_parse_user_path(job, new_path, &new_parsed);
+    if (err != M_VFS_ERR_OK) {
+        return _m_vfs_record_result(err);
+    }
+
+    m_vfs_node_t *old_parent = NULL;
+    char old_leaf[M_VFS_NAME_MAX_LEN];
+    err = _m_vfs_resolve_parent(job,
+                                &old_parsed,
+                                &old_parent,
+                                old_leaf,
+                                sizeof(old_leaf));
+    if (err != M_VFS_ERR_OK) {
+        return _m_vfs_record_result(err);
+    }
+
+    m_vfs_node_t *new_parent = NULL;
+    char new_leaf[M_VFS_NAME_MAX_LEN];
+    err = _m_vfs_resolve_parent(job,
+                                &new_parsed,
+                                &new_parent,
+                                new_leaf,
+                                sizeof(new_leaf));
+    if (err != M_VFS_ERR_OK) {
+        m_vfs_node_release(old_parent);
+        return _m_vfs_record_result(err);
+    }
+
+    if (old_parent->mount != new_parent->mount) {
+        m_vfs_node_release(new_parent);
+        m_vfs_node_release(old_parent);
+        return _m_vfs_record_result(M_VFS_ERR_NOT_SUPPORTED);
+    }
+
+    if (old_parent->fs_type == NULL || old_parent->fs_type->ops == NULL ||
+            old_parent->fs_type->ops->rename == NULL) {
+        m_vfs_node_release(new_parent);
+        m_vfs_node_release(old_parent);
+        return _m_vfs_record_result(M_VFS_ERR_NOT_SUPPORTED);
+    }
+
+    err = old_parent->fs_type->ops->rename(old_parent->mount,
+                                           old_parent,
+                                           old_leaf,
+                                           new_parent,
+                                           new_leaf);
+    m_vfs_node_release(new_parent);
+    m_vfs_node_release(old_parent);
+    return _m_vfs_record_result(err);
+}
+
+m_vfs_error_t
 m_vfs_chdir(m_job_id_t job,
             const char *path)
 {

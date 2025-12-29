@@ -593,6 +593,56 @@ littlefs_unlink(m_vfs_mount_t *mount,
 }
 
 static m_vfs_error_t
+littlefs_rename(m_vfs_mount_t *mount,
+                m_vfs_node_t *old_parent,
+                const char *old_name,
+                m_vfs_node_t *new_parent,
+                const char *new_name)
+{
+    if (old_parent == NULL || new_parent == NULL ||
+            old_name == NULL || new_name == NULL) {
+        return M_VFS_ERR_INVALID_PARAM;
+    }
+
+    littlefs_node_data_t *old_parent_data = old_parent->fs_private;
+    littlefs_node_data_t *new_parent_data = new_parent->fs_private;
+    if (old_parent_data == NULL || new_parent_data == NULL ||
+            !old_parent_data->is_dir || !new_parent_data->is_dir) {
+        return M_VFS_ERR_INVALID_PARAM;
+    }
+
+    char old_path[M_VFS_PATH_MAX_LEN];
+    if (!littlefs_path_join(old_parent_data->path,
+                            old_name,
+                            old_path,
+                            sizeof(old_path))) {
+        return M_VFS_ERR_INVALID_PATH;
+    }
+
+    char new_path[M_VFS_PATH_MAX_LEN];
+    if (!littlefs_path_join(new_parent_data->path,
+                            new_name,
+                            new_path,
+                            sizeof(new_path))) {
+        return M_VFS_ERR_INVALID_PATH;
+    }
+
+    littlefs_mount_data_t *data = littlefs_mount_data(mount);
+    if (data == NULL) {
+        return M_VFS_ERR_INVALID_PARAM;
+    }
+
+    if (!littlefs_lock_take(data)) {
+        return M_VFS_ERR_TIMEOUT;
+    }
+    int err = lfs_rename(&data->lfs,
+                         littlefs_path_for_lfs(old_path),
+                         littlefs_path_for_lfs(new_path));
+    littlefs_lock_give(data);
+    return littlefs_error_translate(err);
+}
+
+static m_vfs_error_t
 littlefs_open(m_vfs_node_t *node,
               int flags,
               m_vfs_file_t **out_file)
@@ -958,6 +1008,7 @@ static const struct m_vfs_fs_ops s_littlefs_ops = {
     .mkdir = littlefs_mkdir,
     .unlink = littlefs_unlink,
     .rmdir = littlefs_unlink,
+    .rename = littlefs_rename,
     .open = littlefs_open,
     .close = littlefs_close,
     .read = littlefs_read,

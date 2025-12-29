@@ -6,12 +6,16 @@ extern crate alloc;
 pub use magnolia_applet_sys as sys;
 
 pub mod args;
+pub mod cli;
 pub mod dir;
 pub mod errno;
+pub mod elf;
 pub mod fs;
 pub mod gpio;
 pub mod io;
+pub mod net;
 pub mod rt;
+pub mod sysctl;
 pub mod time;
 
 pub use args::Args;
