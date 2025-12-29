@@ -4,17 +4,19 @@
 
 #include <ctype.h>
 #include <errno.h>
-#include <limits.h>
 #include <signal.h>
 #include <strings.h>
 #include <stdarg.h>
 #include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#ifndef NSIG
+#define NSIG 32
+#endif
 
 static void eprintf(const char *fmt, ...)
 {
@@ -38,32 +40,161 @@ typedef struct {
     int num;
 } sig_name_t;
 
-static const sig_name_t k_signals[] = {
+static const sig_name_t k_signal_names[] = {
+#ifdef SIGHUP
     { "HUP", SIGHUP },
+#endif
+#ifdef SIGINT
     { "INT", SIGINT },
+#endif
+#ifdef SIGQUIT
     { "QUIT", SIGQUIT },
+#endif
+#ifdef SIGILL
     { "ILL", SIGILL },
+#endif
+#ifdef SIGTRAP
     { "TRAP", SIGTRAP },
+#endif
+#ifdef SIGABRT
     { "ABRT", SIGABRT },
-    { "BUS", SIGBUS },
+#endif
+#ifdef SIGEMT
+    { "EMT", SIGEMT },
+#endif
+#ifdef SIGFPE
     { "FPE", SIGFPE },
+#endif
+#ifdef SIGKILL
     { "KILL", SIGKILL },
-    { "USR1", SIGUSR1 },
+#endif
+#ifdef SIGBUS
+    { "BUS", SIGBUS },
+#endif
+#ifdef SIGSEGV
     { "SEGV", SIGSEGV },
-    { "USR2", SIGUSR2 },
+#endif
+#ifdef SIGSYS
+    { "SYS", SIGSYS },
+#endif
+#ifdef SIGPIPE
     { "PIPE", SIGPIPE },
+#endif
+#ifdef SIGALRM
     { "ALRM", SIGALRM },
+#endif
+#ifdef SIGTERM
     { "TERM", SIGTERM },
+#endif
+#ifdef SIGURG
+    { "URG", SIGURG },
+#endif
+#ifdef SIGSTOP
+    { "STOP", SIGSTOP },
+#endif
+#ifdef SIGTSTP
+    { "TSTP", SIGTSTP },
+#endif
+#ifdef SIGCONT
+    { "CONT", SIGCONT },
+#endif
+#ifdef SIGCHLD
+    { "CHLD", SIGCHLD },
+#endif
+#ifdef SIGTTIN
+    { "TTIN", SIGTTIN },
+#endif
+#ifdef SIGTTOU
+    { "TTOU", SIGTTOU },
+#endif
+#ifdef SIGIO
+    { "IO", SIGIO },
+#elif defined(SIGPOLL)
+    { "IO", SIGPOLL },
+#endif
+#ifdef SIGXCPU
+    { "XCPU", SIGXCPU },
+#endif
+#ifdef SIGXFSZ
+    { "XFSZ", SIGXFSZ },
+#endif
+#ifdef SIGVTALRM
+    { "VTALRM", SIGVTALRM },
+#endif
+#ifdef SIGPROF
+    { "PROF", SIGPROF },
+#endif
+#ifdef SIGWINCH
+    { "WINCH", SIGWINCH },
+#endif
+#ifdef SIGINFO
+    { "INFO", SIGINFO },
+#endif
+#ifdef SIGUSR1
+    { "USR1", SIGUSR1 },
+#endif
+#ifdef SIGUSR2
+    { "USR2", SIGUSR2 },
+#endif
 };
+
+// TODO: Verify BSD alias support for SIGIOT/SIGCLD on target libc.
+static const sig_name_t k_signal_aliases[] = {
+#ifdef SIGIOT
+    { "IOT", SIGIOT },
+#endif
+#ifdef SIGCLD
+    { "CLD", SIGCLD },
+#endif
+};
+
+static const char *g_signal_names[NSIG];
+static bool g_signal_names_init;
+
+// Build a stable signal number -> name table for BSD-style output.
+static void init_signal_names(void)
+{
+    if (g_signal_names_init) {
+        return;
+    }
+    for (int i = 0; i < NSIG; ++i) {
+        g_signal_names[i] = NULL;
+    }
+    g_signal_names[0] = "0";
+    for (size_t i = 0; i < sizeof(k_signal_names) / sizeof(k_signal_names[0]); ++i) {
+        int sig = k_signal_names[i].num;
+        if (sig > 0 && sig < NSIG && g_signal_names[sig] == NULL) {
+            g_signal_names[sig] = k_signal_names[i].name;
+        }
+    }
+    g_signal_names_init = true;
+}
 
 static const char *sig_name_from_num(int sig)
 {
-    for (size_t i = 0; i < sizeof(k_signals) / sizeof(k_signals[0]); ++i) {
-        if (k_signals[i].num == sig) {
-            return k_signals[i].name;
-        }
+    init_signal_names();
+    if (sig < 0 || sig >= NSIG) {
+        return NULL;
     }
-    return NULL;
+    return g_signal_names[sig];
+}
+
+static bool parse_signal_number(const char *spec, int *out_sig)
+{
+    if (spec == NULL || out_sig == NULL) {
+        return false;
+    }
+    errno = 0;
+    char *end = NULL;
+    long v = strtol(spec, &end, 10);
+    if (end == spec || *end != '\0' || errno == ERANGE) {
+        return false;
+    }
+    if (v < 0 || v >= NSIG) {
+        return false;
+    }
+    *out_sig = (int)v;
+    return true;
 }
 
 static bool sig_num_from_name(const char *spec, int *out_sig)
@@ -85,9 +216,12 @@ static bool sig_num_from_name(const char *spec, int *out_sig)
 
     char name[16];
     size_t n = 0;
-    while (*spec && n + 1 < sizeof(name)) {
+    while (*spec) {
         if (*spec == ' ' || *spec == '\t') {
             break;
+        }
+        if (n + 1 >= sizeof(name)) {
+            return false;
         }
         name[n++] = (char)toupper((unsigned char)*spec);
         ++spec;
@@ -98,19 +232,20 @@ static bool sig_num_from_name(const char *spec, int *out_sig)
         return false;
     }
 
-    if (isdigit((unsigned char)name[0])) {
-        char *end = NULL;
-        long v = strtol(name, &end, 10);
-        if (end == name || *end != '\0' || v <= 0 || v > 255) {
-            return false;
-        }
-        *out_sig = (int)v;
-        return true;
+    if (isdigit((unsigned char)name[0]) || name[0] == '+') {
+        return parse_signal_number(name, out_sig);
     }
 
-    for (size_t i = 0; i < sizeof(k_signals) / sizeof(k_signals[0]); ++i) {
-        if (strcmp(name, k_signals[i].name) == 0) {
-            *out_sig = k_signals[i].num;
+    init_signal_names();
+    for (size_t i = 0; i < sizeof(k_signal_names) / sizeof(k_signal_names[0]); ++i) {
+        if (strcmp(name, k_signal_names[i].name) == 0) {
+            *out_sig = k_signal_names[i].num;
+            return true;
+        }
+    }
+    for (size_t i = 0; i < sizeof(k_signal_aliases) / sizeof(k_signal_aliases[0]); ++i) {
+        if (strcmp(name, k_signal_aliases[i].name) == 0) {
+            *out_sig = k_signal_aliases[i].num;
             return true;
         }
     }
@@ -119,11 +254,18 @@ static bool sig_num_from_name(const char *spec, int *out_sig)
 
 static void print_signal_list(void)
 {
-    for (size_t i = 0; i < sizeof(k_signals) / sizeof(k_signals[0]); ++i) {
-        if (i) {
+    init_signal_names();
+    bool first = true;
+    for (int sig = 1; sig < NSIG; ++sig) {
+        const char *name = g_signal_names[sig];
+        if (!name) {
+            continue;
+        }
+        if (!first) {
             (void)write(STDOUT_FILENO, " ", 1);
         }
-        (void)write(STDOUT_FILENO, k_signals[i].name, strlen(k_signals[i].name));
+        (void)write(STDOUT_FILENO, name, strlen(name));
+        first = false;
     }
     (void)write(STDOUT_FILENO, "\n", 1);
 }
@@ -164,18 +306,25 @@ static int handle_list_mode(int argc, char **argv, int idx)
         int sig = 0;
         if (!sig_num_from_name(spec, &sig)) {
             char *end = NULL;
+            errno = 0;
             long v = strtol(spec, &end, 10);
-            if (end != spec && *end == '\0') {
+            if (end != spec && *end == '\0' && errno != ERANGE) {
+                // POSIX: exit status is 128 + signal number.
                 if (v > 128) {
                     v -= 128;
                 }
-                sig = (int)v;
+                if (v < 0 || v >= NSIG) {
+                    sig = -1;
+                } else {
+                    sig = (int)v;
+                }
             } else {
-                sig = 0;
+                sig = -1;
             }
         }
         const char *name = sig_name_from_num(sig);
         if (name == NULL) {
+            eprintf("kill: invalid signal: %s\n", spec ? spec : "");
             any_bad = true;
             continue;
         }
@@ -196,64 +345,45 @@ int main(int argc, char **argv)
     bool list_mode = false;
 
     int i = 1;
-    for (; i < argc; ++i) {
-        const char *arg = argv[i];
-        if (arg == NULL) {
-            continue;
-        }
-        if (strcmp(arg, "--") == 0) {
-            ++i;
-            break;
-        }
-        if (strcmp(arg, "-h") == 0 || strcmp(arg, "--help") == 0) {
+    if (i < argc && argv[i] && strcmp(argv[i], "--") == 0) {
+        ++i;
+    } else if (i < argc && argv[i] && strcmp(argv[i], "-l") == 0) {
+        list_mode = true;
+        ++i;
+    } else if (i < argc && argv[i] && strcmp(argv[i], "-s") == 0) {
+        if (i + 1 >= argc) {
             usage();
-            return 0;
+            return 1;
         }
-        if (strcmp(arg, "-l") == 0) {
-            list_mode = true;
-            ++i;
-            break;
+        if (!sig_num_from_name(argv[i + 1], &sig)) {
+            eprintf("kill: invalid signal: %s\n", argv[i + 1]);
+            return 1;
         }
-        if (strcmp(arg, "-s") == 0) {
-            if (i + 1 >= argc) {
-                usage();
-                return 1;
-            }
-            if (!sig_num_from_name(argv[i + 1], &sig)) {
-                eprintf("kill: invalid signal: %s\n", argv[i + 1]);
-                return 1;
-            }
-            i += 2;
-            break;
+        i += 2;
+    } else if (i < argc && argv[i] && strcmp(argv[i], "-n") == 0) {
+        if (i + 1 >= argc) {
+            usage();
+            return 1;
         }
-        if (strcmp(arg, "-n") == 0) {
-            if (i + 1 >= argc) {
-                usage();
-                return 1;
-            }
-            char *end = NULL;
-            long v = strtol(argv[i + 1], &end, 10);
-            if (end == argv[i + 1] || *end != '\0' || v <= 0 || v > 255) {
-                eprintf("kill: invalid signal number: %s\n", argv[i + 1]);
-                return 1;
-            }
-            sig = (int)v;
-            i += 2;
-            break;
+        if (!parse_signal_number(argv[i + 1], &sig)) {
+            eprintf("kill: invalid signal number: %s\n", argv[i + 1]);
+            return 1;
         }
-        if (arg_is_signal_shortopt(arg)) {
-            if (!sig_num_from_name(arg + 1, &sig)) {
-                eprintf("kill: invalid signal: %s\n", arg + 1);
-                return 1;
-            }
-            ++i;
-            break;
+        i += 2;
+    } else if (i < argc && argv[i] && arg_is_signal_shortopt(argv[i])) {
+        if (!sig_num_from_name(argv[i] + 1, &sig)) {
+            eprintf("kill: invalid signal: %s\n", argv[i] + 1);
+            return 1;
         }
-        break;
+        ++i;
     }
 
     if (list_mode) {
         return handle_list_mode(argc, argv, i);
+    }
+
+    if (i < argc && argv[i] && strcmp(argv[i], "--") == 0) {
+        ++i;
     }
 
     if (i >= argc) {
@@ -268,18 +398,20 @@ int main(int argc, char **argv)
             continue;
         }
         char *end = NULL;
+        errno = 0;
         long pid_l = strtol(pid_s, &end, 10);
-        if (end == pid_s || *end != '\0') {
+        if (end == pid_s || *end != '\0' || errno == ERANGE) {
             eprintf("kill: invalid pid: %s\n", pid_s);
             failed = true;
             continue;
         }
-        if (pid_l <= 0 || pid_l > INT32_MAX) {
+        pid_t pid = (pid_t)pid_l;
+        if ((long)pid != pid_l) {
             eprintf("kill: invalid pid: %s\n", pid_s);
             failed = true;
             continue;
         }
-        if (kill((pid_t)pid_l, sig) != 0) {
+        if (kill(pid, sig) != 0) {
             eprintf("kill: %s: %s\n", pid_s, strerror(errno));
             failed = true;
         }

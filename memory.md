@@ -24,3 +24,5 @@
 - Reworked `applets/mainline/ln` to remove GNU options, implement BSD-style option parsing, hard/symbolic link creation, overwrite prompting, and directory handling with recursive -F removal.
 - Updated `applets/mainline/paste` to parse BSD-style delimiter escapes (including `\\n`, `\\t`, `\\0`, and `\\\\`) and handle NUL delimiters safely.
 - Updated Zig `cat` to track numbering/blank-line state across files, add buffered output with -u support, and report BSD-style read/write errors.
+- Added mainline BSD applet `cksum`.
+- Updated `applets/mainline/kill` to allow BSD-style pid targeting (including 0/negative), expand signal name handling, and tighten list-mode parsing.
