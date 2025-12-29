@@ -1,13 +1,13 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-static const char *g_version = "Magnolia coreutils 0.1";
 
 static void eprintf(const char *fmt, ...)
 {
@@ -26,11 +26,6 @@ static void eprintf(const char *fmt, ...)
     (void)write(STDERR_FILENO, buf, len);
 }
 
-static bool streq(const char *a, const char *b)
-{
-    return a && b && strcmp(a, b) == 0;
-}
-
 static int write_all(int fd, const void *buf, size_t len)
 {
     const unsigned char *p = (const unsigned char *)buf;
@@ -38,6 +33,13 @@ static int write_all(int fd, const void *buf, size_t len)
     while (off < len) {
         ssize_t w = write(fd, p + off, len - off);
         if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (w == 0) {
+            errno = EIO;
             return -1;
         }
         off += (size_t)w;
@@ -45,66 +47,86 @@ static int write_all(int fd, const void *buf, size_t len)
     return 0;
 }
 
-static void print_help(void)
+static ssize_t read_retry(int fd, void *buf, size_t len)
 {
-    printf("usage: tee [OPTION]... [FILE]...\n");
-    printf("  -a           append to the given FILEs\n");
-    printf("      --help   display this help and exit\n");
-    printf("      --version output version information and exit\n");
+    while (1) {
+        ssize_t r = read(fd, buf, len);
+        if (r < 0 && errno == EINTR) {
+            continue;
+        }
+        return r;
+    }
 }
 
-static void print_version(void)
-{
-    printf("tee (%s)\n", g_version);
-}
+typedef struct {
+    int fd;
+    const char *path;
+    bool active;
+} output_t;
 
 int main(int argc, char **argv)
 {
-    for (int i = 1; i < argc; ++i) {
-        if (streq(argv[i], "--help")) {
-            print_help();
-            return 0;
-        }
-        if (streq(argv[i], "--version")) {
-            print_version();
-            return 0;
-        }
-    }
-
     bool append = false;
+    bool ignore_int = false;
     int opt;
-    while ((opt = getopt(argc, argv, "a")) != -1) {
+    opterr = 0;
+    while ((opt = getopt(argc, argv, "ai")) != -1) {
         switch (opt) {
         case 'a':
             append = true;
             break;
+        case 'i':
+            ignore_int = true;
+            break;
         default:
-            eprintf("usage: tee [-a] [FILE...]\n");
+            eprintf("usage: tee [-ai] [file ...]\n");
             return 1;
         }
     }
 
-    int out_fds[16];
-    int out_count = 0;
-    for (int i = optind; i < argc && out_count < (int)(sizeof(out_fds) / sizeof(out_fds[0])); ++i) {
+    if (ignore_int) {
+        (void)signal(SIGINT, SIG_IGN);
+    }
+
+    size_t out_cap = 0;
+    if (optind < argc) {
+        out_cap = (size_t)(argc - optind);
+    }
+    output_t *outs = NULL;
+    if (out_cap > 0) {
+        outs = (output_t *)calloc(out_cap, sizeof(*outs));
+        if (!outs) {
+            eprintf("tee: %s\n", strerror(errno));
+            return 1;
+        }
+    }
+
+    size_t out_count = 0;
+    int failed = 0;
+    for (int i = optind; i < argc; ++i) {
         const char *path = argv[i];
         if (!path) {
             continue;
         }
-        int flags = O_WRONLY | O_CREAT;
-        flags |= append ? O_APPEND : O_TRUNC;
+        if (strcmp(path, "-") == 0) {
+            continue;
+        }
+        int flags = O_WRONLY | O_CREAT | (append ? O_APPEND : O_TRUNC);
         int fd = open(path, flags, 0666);
         if (fd < 0) {
             eprintf("tee: %s: %s\n", path, strerror(errno));
-            return 1;
+            failed = 1;
+            continue;
         }
-        out_fds[out_count++] = fd;
+        outs[out_count].fd = fd;
+        outs[out_count].path = path;
+        outs[out_count].active = true;
+        out_count++;
     }
 
     char buf[512];
-    int failed = 0;
     while (1) {
-        ssize_t r = read(STDIN_FILENO, buf, sizeof(buf));
+        ssize_t r = read_retry(STDIN_FILENO, buf, sizeof(buf));
         if (r < 0) {
             eprintf("tee: read: %s\n", strerror(errno));
             failed = 1;
@@ -114,21 +136,28 @@ int main(int argc, char **argv)
             break;
         }
         if (write_all(STDOUT_FILENO, buf, (size_t)r) != 0) {
-            eprintf("tee: write: %s\n", strerror(errno));
+            eprintf("tee: stdout: %s\n", strerror(errno));
             failed = 1;
             break;
         }
-        for (int i = 0; i < out_count; ++i) {
-            if (write_all(out_fds[i], buf, (size_t)r) != 0) {
-                eprintf("tee: write: %s\n", strerror(errno));
+        for (size_t i = 0; i < out_count; ++i) {
+            if (!outs[i].active) {
+                continue;
+            }
+            if (write_all(outs[i].fd, buf, (size_t)r) != 0) {
+                eprintf("tee: %s: %s\n", outs[i].path ? outs[i].path : "file", strerror(errno));
                 failed = 1;
+                (void)close(outs[i].fd);
+                outs[i].active = false;
             }
         }
     }
 
-    for (int i = 0; i < out_count; ++i) {
-        (void)close(out_fds[i]);
+    for (size_t i = 0; i < out_count; ++i) {
+        if (outs[i].active) {
+            (void)close(outs[i].fd);
+        }
     }
+    free(outs);
     return failed ? 1 : 0;
 }
-
