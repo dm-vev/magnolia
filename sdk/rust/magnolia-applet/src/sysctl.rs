@@ -1,5 +1,6 @@
 use alloc::ffi::CString;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::ffi::CStr;
 
@@ -28,7 +29,7 @@ fn rc_to_result(rc: i32) -> Result<()> {
 
 pub fn get(key: &str) -> Result<String> {
     let ckey = cstring_from_str(key)?;
-    let mut buf = vec![0i8; 256];
+    let mut buf: Vec<sys::c_char> = vec![0; 256];
     let rc = unsafe { sys::m_sysctl_get(ckey.as_ptr(), buf.as_mut_ptr(), buf.len()) };
     rc_to_result(rc)?;
     let value = unsafe { CStr::from_ptr(buf.as_ptr()) };

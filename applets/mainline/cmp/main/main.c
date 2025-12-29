@@ -243,7 +243,7 @@ int main(int argc, char **argv)
     bool silent = false;
 
     int opt;
-    while ((opt = getopt(argc, argv, "ls")) != -1) {
+    while ((opt = getopt(argc, argv, "lst")) != -1) {
         switch (opt) {
         case 'l':
             list = true;
@@ -251,20 +251,22 @@ int main(int argc, char **argv)
         case 's':
             silent = true;
             break;
+        case 't':
+            break;
         default:
-            eprintf("usage: cmp [-l | -s] file1 file2 [skip1 [skip2]]\n");
+            eprintf("usage: cmp [-l | -s | -t] file1 file2 [skip1 [skip2]]\n");
             return 2;
         }
     }
 
     if (list && silent) {
-        eprintf("usage: cmp [-l | -s] file1 file2 [skip1 [skip2]]\n");
+        eprintf("usage: cmp [-l | -s | -t] file1 file2 [skip1 [skip2]]\n");
         return 2;
     }
 
     int remaining = argc - optind;
     if (remaining < 2 || remaining > 4) {
-        eprintf("usage: cmp [-l | -s] file1 file2 [skip1 [skip2]]\n");
+        eprintf("usage: cmp [-l | -s | -t] file1 file2 [skip1 [skip2]]\n");
         return 2;
     }
 

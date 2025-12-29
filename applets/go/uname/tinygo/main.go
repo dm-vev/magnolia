@@ -146,6 +146,7 @@ func unamePrint(o *unameOpts) {
 
 //export app_main
 func app_main(argc C.int, argv **C.char) C.int {
+	magnolia.InitRuntime()
 	args := magnolia.Args(int32(argc), unsafe.Pointer(argv))
 
 	opts := unameOpts{}

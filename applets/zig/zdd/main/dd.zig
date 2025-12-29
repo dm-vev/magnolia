@@ -8,6 +8,36 @@ const args = mg.args;
 const constants = mg.constants;
 const sys = mg.sys;
 
+fn udivmod(n: u64, d: u64, rem: ?*u64) u64 {
+    if (d == 0) {
+        if (rem) |r| r.* = 0;
+        return 0;
+    }
+    var q: u64 = 0;
+    var r: u64 = 0;
+    var i: u32 = 64;
+    while (i > 0) : (i -= 1) {
+        const shift: u6 = @intCast(i - 1);
+        r = (r << 1) | ((n >> shift) & 1);
+        if (r >= d) {
+            r -= d;
+            q |= @as(u64, 1) << shift;
+        }
+    }
+    if (rem) |out| out.* = r;
+    return q;
+}
+
+pub export fn __udivdi3(a: u64, b: u64) u64 {
+    return udivmod(a, b, null);
+}
+
+pub export fn __umoddi3(a: u64, b: u64) u64 {
+    var r: u64 = 0;
+    _ = udivmod(a, b, &r);
+    return r;
+}
+
 fn eprintf(comptime fmt: []const u8, args_list: anytype) void {
     var buf: [256]u8 = undefined;
     const msg = std.fmt.bufPrint(&buf, fmt, args_list) catch return;
@@ -105,6 +135,11 @@ fn ddMain(argv: []const []const u8) c_int {
     var sync = false;
     var notrunc = false;
     var status_none = false;
+
+    if (argv.len == 0) {
+        eprintf("usage: dd [if=file] [of=file] [ibs=n] [obs=n] [bs=n] [count=n] [skip=n] [seek=n] [conv=...] [status=none]\n", .{});
+        return 1;
+    }
 
     for (argv) |arg| {
         const eq = std.mem.indexOfScalar(u8, arg, '=') orelse {

@@ -26,6 +26,7 @@ mainline/du
 mainline/echo
 mainline/elftest
 mainline/env
+mainline/fold
 mainline/false
 mainline/free
 mainline/head
@@ -91,6 +92,7 @@ mainline/du
 mainline/echo
 mainline/elftest
 mainline/env
+mainline/fold
 mainline/false
 mainline/free
 mainline/head
@@ -154,6 +156,7 @@ mainline/du
 mainline/echo
 mainline/elftest
 mainline/env
+mainline/fold
 mainline/false
 mainline/free
 mainline/head
@@ -215,6 +218,7 @@ mainline/dirname
 mainline/du
 mainline/elftest
 mainline/env
+mainline/fold
 mainline/free
 mainline/head
 mainline/init
@@ -277,6 +281,7 @@ mainline/du
 mainline/echo
 mainline/elftest
 mainline/env
+mainline/fold
 mainline/false
 mainline/free
 mainline/head
@@ -333,6 +338,7 @@ mainline/dirname
 mainline/du
 mainline/elftest
 mainline/env
+mainline/fold
 mainline/free
 mainline/head
 mainline/init
@@ -392,6 +398,7 @@ mainline/du
 mainline/echo
 mainline/elftest
 mainline/env
+mainline/fold
 mainline/false
 mainline/free
 mainline/head

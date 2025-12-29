@@ -13,6 +13,17 @@ extern char **environ;
 
 static const char *k_default_path = "/usr/bin:/bin";
 
+#ifdef ESP_PLATFORM
+static int execv_stub(const char *path, char *const argv[])
+{
+    (void)path;
+    (void)argv;
+    errno = ENOSYS;
+    return -1;
+}
+#define execv execv_stub
+#endif
+
 typedef struct {
     char **argv;
     int argc;

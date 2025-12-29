@@ -926,7 +926,7 @@ int vi_main(int argc, char **argv)
             initial_cmds[0] = xstrndup(p, MAX_INPUT_LEN);
     }
 #endif
-    while ((c = getopt(argc, argv, "hCRH-" USE_FEATURE_VI_COLON("c:"))) != -1) {
+    while ((c = getopt(argc, argv, "hCRH-t:" USE_FEATURE_VI_COLON("c:"))) != -1) {
         switch (c) {
 #if ENABLE_FEATURE_VI_CRASHME
         case 'C':
@@ -944,6 +944,9 @@ int vi_main(int argc, char **argv)
                 initial_cmds[initial_cmds[0] != 0] = xstrndup(optarg, MAX_INPUT_LEN);
             break;
 #endif
+        case 't':
+            /* Tag jumps are not implemented; accept -t to avoid a hard error. */
+            break;
         case 'H':
         case '-':
             show_help();

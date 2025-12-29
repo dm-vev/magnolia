@@ -1,5 +1,6 @@
 use alloc::ffi::CString;
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::mem;
 use core::str;
@@ -82,8 +83,10 @@ pub fn list_ifaces() -> Result<Vec<String>> {
         return Ok(Vec::new());
     }
 
-    let mut entries: Vec<sys::magnolia_net_iface_name_t> =
-        vec![unsafe { mem::zeroed() }; count as usize];
+    let mut entries: Vec<sys::magnolia_net_iface_name_t> = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        entries.push(unsafe { mem::zeroed() });
+    }
     let rc = unsafe {
         sys::m_net_list_ifaces(entries.as_mut_ptr(), entries.len(), &mut count)
     };
@@ -222,8 +225,10 @@ pub fn socket_summary() -> Result<Vec<NetSocketSummary>> {
         return Ok(Vec::new());
     }
 
-    let mut entries: Vec<sys::magnolia_net_socket_summary_t> =
-        vec![unsafe { mem::zeroed() }; count as usize];
+    let mut entries: Vec<sys::magnolia_net_socket_summary_t> = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        entries.push(unsafe { mem::zeroed() });
+    }
     let rc = unsafe {
         sys::m_net_socket_summary(entries.as_mut_ptr(), entries.len(), &mut count)
     };

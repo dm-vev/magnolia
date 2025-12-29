@@ -67,11 +67,20 @@ static char *join_path(const char *dir, const char *name)
     return out;
 }
 
+static int lstat_compat(const char *path, struct stat *st)
+{
+#ifdef ESP_PLATFORM
+    return stat(path, st);
+#else
+    return lstat(path, st);
+#endif
+}
+
 static int rm_path(const char *path, bool recursive, bool force, bool interactive, int *failed)
 {
     struct stat st;
     /* Use lstat so we never follow symlinks when deciding to recurse. */
-    if (lstat(path, &st) != 0) {
+    if (lstat_compat(path, &st) != 0) {
         if (force && errno == ENOENT) {
             return 0;
         }

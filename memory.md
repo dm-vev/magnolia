@@ -1,4 +1,5 @@
 ## Codex Intercall Memory
+- Added mainline BSD applet `fold`.
 - Added mainline BSD applet `paste`.
 - Updated `applets/mainline/cat` to implement BSD cat flags (-b/-e/-n/-s/-t/-u/-v) with line numbering and robust I/O/error handling.
 - Updated `applets/mainline/echo` and `applets/go/echo` to match BSD echo behavior (only leading `-n`, escape processing by default, `\c` stop handling, robust writes).
@@ -27,3 +28,5 @@
 - Added mainline BSD applet `cksum`.
 - Updated `applets/mainline/kill` to allow BSD-style pid targeting (including 0/negative), expand signal name handling, and tighten list-mode parsing.
 - Updated Zig `head` to mirror BSD/mainline option parsing, header handling, and error reporting with robust I/O.
+- Updated clear across mainline/Rust/Zig/Go to use BSD-style options (-T/-V/-x), terminal capability checks, and consistent error handling.
+- Reworked mainline `tr` to remove GNU-only flags, add BSD/POSIX-style option parsing, and implement full set expansion (classes, ranges, escapes, repeat), translation/deletion/squeeze logic with robust I/O.

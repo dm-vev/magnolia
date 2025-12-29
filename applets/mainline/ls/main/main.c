@@ -1,6 +1,5 @@
 #include <dirent.h>
 #include <errno.h>
-#include <getopt.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -187,43 +186,51 @@ static int ls_dir(const char *path, const ls_opts_t *opts)
 int main(int argc, char **argv)
 {
     ls_opts_t opts = {0};
-    optind = 1;
-#ifdef optreset
-    optreset = 1;
-#endif
+    const char *paths[argc > 1 ? (size_t)argc - 1 : 1];
+    int n_paths = 0;
+    bool parse_opts = true;
 
-    int opt;
-    while ((opt = getopt(argc, argv, "ald1")) != -1) {
-        switch (opt) {
-        case 'a':
-            opts.all = true;
-            break;
-        case 'l':
-            opts.list_long = true;
-            break;
-        case 'd':
-            opts.list_dirs = true;
-            break;
-        case '1':
-            /* default */
-            break;
-        default:
-            eprintf("usage: ls [-a] [-d] [-l] [file ...]\n");
-            return 1;
+    for (int i = 1; i < argc; ++i) {
+        const char *arg = argv[i];
+        if (arg == NULL) {
+            continue;
         }
+        if (parse_opts && arg[0] == '-' && arg[1] != '\0') {
+            if (strcmp(arg, "--") == 0) {
+                parse_opts = false;
+                continue;
+            }
+            for (size_t j = 1; arg[j] != '\0'; ++j) {
+                switch (arg[j]) {
+                case 'a':
+                    opts.all = true;
+                    break;
+                case 'l':
+                    opts.list_long = true;
+                    break;
+                case 'd':
+                    opts.list_dirs = true;
+                    break;
+                case '1':
+                    /* default */
+                    break;
+                default:
+                    eprintf("usage: ls [-a] [-d] [-l] [file ...]\n");
+                    return 1;
+                }
+            }
+            continue;
+        }
+        paths[n_paths++] = arg;
     }
 
-    int n_paths = argc - optind;
     if (n_paths <= 0) {
         return ls_dir(".", &opts);
     }
 
     int failed = 0;
-    for (int i = optind; i < argc; ++i) {
-        const char *path = argv[i];
-        if (path == NULL) {
-            continue;
-        }
+    for (int i = 0; i < n_paths; ++i) {
+        const char *path = paths[i];
         if (n_paths > 1) {
             struct stat st;
             if (stat(path, &st) == 0 && S_ISDIR(st.st_mode) && !opts.list_dirs) {
@@ -232,7 +239,7 @@ int main(int argc, char **argv)
         }
 
         failed |= ls_dir(path, &opts);
-        if (n_paths > 1 && i + 1 < argc) {
+        if (n_paths > 1 && i + 1 < n_paths) {
             printf("\n");
         }
     }

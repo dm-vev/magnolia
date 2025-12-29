@@ -1114,6 +1114,13 @@ CONFIG_MAGNOLIA_ALLOC_WRAP_LIBC=y
 # end of Magnolia Allocator
 
 #
+# Magnolia Network
+#
+# default:
+# CONFIG_MAGNOLIA_NET_ENABLE is not set
+# end of Magnolia Network
+
+#
 # Magnolia ELF Loader
 #
 # default:
@@ -1235,6 +1242,10 @@ CONFIG_MAGNOLIA_DEVFS_GPIO=y
 CONFIG_MAGNOLIA_DEVFS_GPIO_EVENT_QUEUE_LEN=32
 # default:
 CONFIG_MAGNOLIA_DEVFS_PIPES=y
+# default:
+CONFIG_MAGNOLIA_DEVFS_KMSG=y
+# default:
+CONFIG_MAGNOLIA_DEVFS_KMSG_BUFFER_SIZE=4096
 # default:
 CONFIG_MAGNOLIA_DEVFS_PIPE_COUNT=4
 # default:

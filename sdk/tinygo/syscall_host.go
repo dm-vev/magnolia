@@ -44,3 +44,4 @@ func Chdir(path string) error                           { return errHostUnsuppor
 func Getcwd(buf []byte) (string, error)                 { return "", errHostUnsupported }
 func Cwd() (string, error)                              { return "", errHostUnsupported }
 func Args(argc int32, argv unsafe.Pointer) []string      { return nil }
+func InitRuntime()                                      {}

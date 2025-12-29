@@ -21,6 +21,7 @@ func uitoa(v uint) string {
 
 //export app_main
 func app_main(argc C.int, argv **C.char) C.int {
+	magnolia.InitRuntime()
 	args := magnolia.Args(int32(argc), unsafe.Pointer(argv))
 	_, _ = magnolia.WriteString(magnolia.Stdout, "goargs: argv\n")
 	for i, a := range args {

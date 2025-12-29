@@ -102,6 +102,13 @@ static int emit_clear(const struct clear_term *term, bool clear_scrollback)
 
 int main(int argc, char **argv)
 {
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--help") == 0) {
+            usage();
+            return 0;
+        }
+    }
+
     opterr = 0;
     const char *term_override = NULL;
     bool no_scrollback = false;

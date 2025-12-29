@@ -82,6 +82,19 @@ def parse_idf_target(path: Path) -> str | None:
     return None
 
 
+def read_cmake_home(cache_path: Path) -> Path | None:
+    try:
+        for raw in cache_path.read_text().splitlines():
+            if raw.startswith("CMAKE_HOME_DIRECTORY:INTERNAL="):
+                value = raw.split("=", 1)[1].strip()
+                if value:
+                    return Path(value)
+                return None
+    except OSError:
+        return None
+    return None
+
+
 def parse_partition_size() -> int:
     csv_path = ROOT / "partitions.csv"
     if not csv_path.exists():
@@ -415,7 +428,12 @@ def build_applets(targets: list[str] | None = None, distribution: str | None = N
                 if not run(["idf.py", "set-target", root_target], cwd=applet, env=base_env):
                     log(f"Skipping failed applet target set: {applet.name}")
                     return False
-        cache_path = applet / "build" / "CMakeCache.txt"
+        build_dir = applet / "build"
+        cache_path = build_dir / "CMakeCache.txt"
+        cached_home = read_cmake_home(cache_path) if cache_path.exists() else None
+        if cached_home is not None and cached_home.resolve() != applet.resolve():
+            log(f"Cleaning stale build dir for {applet.name} (configured for {cached_home})")
+            shutil.rmtree(build_dir, ignore_errors=True)
         main_cmake = applet / "main" / "CMakeLists.txt"
         elf_loader_cmake = ROOT / "managed_components" / "espressif__elf_loader" / "elf_loader.cmake"
         reconfigure_inputs = [main_cmake, elf_loader_cmake]

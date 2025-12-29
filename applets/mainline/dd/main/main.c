@@ -43,6 +43,11 @@ static int write_all(int fd, const void *buf, size_t len)
     return 0;
 }
 
+static void usage(void)
+{
+    eprintf("usage: dd [if=file] [of=file] [ibs=n] [obs=n] [bs=n] [count=n] [skip=n] [seek=n] [conv=...] [status=none]\n");
+}
+
 static int parse_token(const char *s, char **end_out, uint64_t *value)
 {
     if (s == NULL || *s == '\0') {
@@ -180,6 +185,11 @@ int main(int argc, char **argv)
     bool sync = false;
     bool notrunc = false;
     bool status_none = false;
+
+    if (argc <= 1) {
+        usage();
+        return 1;
+    }
 
     for (int i = 1; i < argc; ++i) {
         const char *arg = argv[i];

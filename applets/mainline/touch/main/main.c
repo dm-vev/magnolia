@@ -33,6 +33,15 @@ typedef struct {
     time_t mtime;
 } touch_base_t;
 
+static int lstat_compat(const char *path, struct stat *st)
+{
+#ifdef ESP_PLATFORM
+    return stat(path, st);
+#else
+    return lstat(path, st);
+#endif
+}
+
 static void eprintf(const char *fmt, ...)
 {
     char buf[256];
@@ -304,7 +313,7 @@ static int parse_adjust(const char *arg, int64_t *out)
 static int stat_path(const char *path, bool no_follow, struct stat *st)
 {
     if (no_follow) {
-        return lstat(path, st);
+        return lstat_compat(path, st);
     }
     return stat(path, st);
 }

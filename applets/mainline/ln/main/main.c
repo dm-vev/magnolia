@@ -144,10 +144,19 @@ static char *make_target_path(const char *dir, const char *src)
     return join_path_len(dir, base, base_len);
 }
 
+static int lstat_compat(const char *path, struct stat *st)
+{
+#ifdef ESP_PLATFORM
+    return stat(path, st);
+#else
+    return lstat(path, st);
+#endif
+}
+
 static int stat_path(const char *path, bool follow, struct stat *out)
 {
     struct stat st;
-    if (lstat(path, &st) != 0) {
+    if (lstat_compat(path, &st) != 0) {
         return -1;
     }
     if (follow && S_ISLNK(st.st_mode)) {
@@ -163,7 +172,7 @@ static int stat_path(const char *path, bool follow, struct stat *out)
 static int rm_tree(const char *path)
 {
     struct stat st;
-    if (lstat(path, &st) != 0) {
+    if (lstat_compat(path, &st) != 0) {
         return -1;
     }
     if (!S_ISDIR(st.st_mode)) {
@@ -207,7 +216,7 @@ static int ensure_target_ready(const char *dst,
                                bool *skipped)
 {
     struct stat st;
-    if (lstat(dst, &st) != 0) {
+    if (lstat_compat(dst, &st) != 0) {
         if (errno == ENOENT) {
             return 0;
         }
