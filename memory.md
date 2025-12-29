@@ -1,4 +1,5 @@
 ## Codex Intercall Memory
+- Added mainline BSD applet `paste`.
 - Updated `applets/mainline/cat` to implement BSD cat flags (-b/-e/-n/-s/-t/-u/-v) with line numbering and robust I/O/error handling.
 - Updated `applets/mainline/echo` and `applets/go/echo` to match BSD echo behavior (only leading `-n`, escape processing by default, `\c` stop handling, robust writes).
 
@@ -21,3 +22,5 @@
 - Updated `applets/mainline/env` to implement BSD env option parsing (-i/-u/-P/-S/-v), argument splitting for -S, environment clearing, and exec path search with robust error handling.
 - Updated Go `pwd` to match BSD/mainline behavior by validating $PWD with stat, honoring -L/-P, handling long paths, and reporting too many arguments.
 - Reworked `applets/mainline/ln` to remove GNU options, implement BSD-style option parsing, hard/symbolic link creation, overwrite prompting, and directory handling with recursive -F removal.
+- Updated `applets/mainline/paste` to parse BSD-style delimiter escapes (including `\\n`, `\\t`, `\\0`, and `\\\\`) and handle NUL delimiters safely.
+- Updated Zig `cat` to track numbering/blank-line state across files, add buffered output with -u support, and report BSD-style read/write errors.

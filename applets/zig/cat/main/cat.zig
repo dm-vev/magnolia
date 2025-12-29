@@ -3,9 +3,39 @@ const mg = @import("magnolia");
 
 const args = mg.args;
 const constants = mg.constants;
+const errno = mg.errno;
 const fs = mg.fs;
 const io = mg.io;
 const mem = mg.mem;
+
+const NumberMode = enum {
+    none,
+    all,
+    nonblank,
+};
+
+const CatOptions = struct {
+    number_mode: NumberMode,
+    squeeze_blank: bool,
+    show_ends: bool,
+    show_tabs: bool,
+    show_nonprint: bool,
+    unbuffered: bool,
+};
+
+const CatState = struct {
+    // Persist across files to match BSD cat numbering and blank-line behavior.
+    line_no: u64,
+    at_line_start: bool,
+    blank_run: bool,
+};
+
+const OutBuf = struct {
+    fd: c_int,
+    unbuffered: bool,
+    buf: [4096]u8,
+    len: usize,
+};
 
 fn eprintf(comptime fmt: []const u8, list: anytype) void {
     var buf: [256]u8 = undefined;
@@ -13,119 +43,233 @@ fn eprintf(comptime fmt: []const u8, list: anytype) void {
     _ = io.writeAll(constants.fd.stderr, msg) catch {};
 }
 
-fn writeByte(b: u8) void {
-    var buf: [1]u8 = .{b};
-    _ = io.writeAll(constants.fd.stdout, &buf) catch {};
+fn usage() void {
+    eprintf("usage: cat [-benstuv] [file ...]\n", .{});
 }
 
-fn writeBytes(bytes: []const u8) void {
-    _ = io.writeAll(constants.fd.stdout, bytes) catch {};
+fn errnoMessage(err: anyerror) []const u8 {
+    if (err == error.Io) return "I/O error";
+    return std.mem.span(errno.strerrorZ(errno.get()));
 }
 
-fn emitLineNumber(num: usize) void {
-    var buf: [16]u8 = undefined;
-    const msg = std.fmt.bufPrint(&buf, "{d:>6}\t", .{num}) catch return;
-    writeBytes(msg);
+fn readRetry(fd: c_int, buf: []u8) errno.PosixError!usize {
+    while (true) {
+        const n = fs.readSome(fd, buf) catch |err| switch (err) {
+            error.Interrupted => continue,
+            else => return err,
+        };
+        return n;
+    }
 }
 
-fn emitVisualByte(b: u8, show_tabs: bool, show_nonprint: bool) void {
+fn writeAllRetry(fd: c_int, buf: []const u8) errno.PosixError!void {
+    var off: usize = 0;
+    while (off < buf.len) {
+        const n = fs.writeSome(fd, buf[off..]) catch |err| switch (err) {
+            error.Interrupted => continue,
+            else => return err,
+        };
+        if (n == 0) return error.Io;
+        off += n;
+    }
+}
+
+fn outFlush(out: *OutBuf) errno.PosixError!void {
+    if (out.len == 0) return;
+    try writeAllRetry(out.fd, out.buf[0..out.len]);
+    out.len = 0;
+}
+
+fn outWrite(out: *OutBuf, buf: []const u8) errno.PosixError!void {
+    if (buf.len == 0) return;
+    if (out.unbuffered) {
+        return writeAllRetry(out.fd, buf);
+    }
+    if (buf.len >= out.buf.len) {
+        try outFlush(out);
+        return writeAllRetry(out.fd, buf);
+    }
+    if (out.len + buf.len > out.buf.len) {
+        try outFlush(out);
+    }
+    std.mem.copyForwards(u8, out.buf[out.len .. out.len + buf.len], buf);
+    out.len += buf.len;
+}
+
+fn emitLineNumber(out: *OutBuf, line_no: *u64) errno.PosixError!void {
+    var buf: [32]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, "{d:>6}\t", .{line_no.*}) catch return error.Io;
+    line_no.* += 1;
+    return outWrite(out, msg);
+}
+
+fn emitVisibleByte(out: *OutBuf, b: u8, opt: *const CatOptions) errno.PosixError!void {
     if (b == '\t') {
-        if (show_tabs) {
-            writeBytes("^I");
-        } else {
-            writeByte('\t');
+        if (opt.show_tabs) {
+            return outWrite(out, "^I");
         }
-        return;
+        var tab: [1]u8 = .{b};
+        return outWrite(out, &tab);
     }
-    if (!show_nonprint) {
-        writeByte(b);
-        return;
+    if (!opt.show_nonprint) {
+        var ch: [1]u8 = .{b};
+        return outWrite(out, &ch);
     }
 
+    var buf: [4]u8 = undefined;
+    var len: usize = 0;
     var ch = b;
-    if (ch >= 0x80) {
-        writeBytes("M-");
+    if ((ch & 0x80) != 0) {
+        buf[len] = 'M';
+        len += 1;
+        buf[len] = '-';
+        len += 1;
         ch &= 0x7f;
     }
     if (ch < 0x20) {
-        writeByte('^');
-        writeByte(ch + 0x40);
-        return;
+        buf[len] = '^';
+        len += 1;
+        buf[len] = ch + 0x40;
+        len += 1;
+        return outWrite(out, buf[0..len]);
     }
     if (ch == 0x7f) {
-        writeBytes("^?");
-        return;
+        buf[len] = '^';
+        len += 1;
+        buf[len] = '?';
+        len += 1;
+        return outWrite(out, buf[0..len]);
     }
-    writeByte(ch);
+    buf[len] = ch;
+    len += 1;
+    return outWrite(out, buf[0..len]);
 }
 
-fn cat_fd(fd: c_int, name: []const u8, number: bool, number_nonblank: bool, squeeze_blank: bool, show_ends: bool, show_tabs: bool, show_nonprint: bool) bool {
+fn needsProcessing(opt: *const CatOptions) bool {
+    return opt.number_mode != .none or opt.squeeze_blank or opt.show_ends or opt.show_tabs or opt.show_nonprint;
+}
+
+fn reportStdoutError(err: anyerror) bool {
+    eprintf("cat: stdout: {s}\n", .{errnoMessage(err)});
+    return false;
+}
+
+fn catPlain(fd: c_int, name: []const u8) bool {
     var buf: [512]u8 = undefined;
-    var line_no: usize = 1;
-    var at_line_start = true;
-    var last_blank = false;
     while (true) {
-        const n = fs.readSome(fd, &buf) catch {
-            eprintf("cat: {s}: read failed\n", .{name});
+        const n = readRetry(fd, &buf) catch |err| {
+            eprintf("cat: {s}: {s}\n", .{name, errnoMessage(err)});
+            return false;
+        };
+        if (n == 0) break;
+        if (writeAllRetry(constants.fd.stdout, buf[0..n])) |_| {} else |err| {
+            return reportStdoutError(err);
+        }
+    }
+    return true;
+}
+
+fn catStream(fd: c_int, name: []const u8, opt: *const CatOptions, state: *CatState) bool {
+    var out = OutBuf{
+        .fd = constants.fd.stdout,
+        .unbuffered = opt.unbuffered,
+        .buf = undefined,
+        .len = 0,
+    };
+    var buf: [512]u8 = undefined;
+    while (true) {
+        const n = readRetry(fd, &buf) catch |err| {
+            const err_msg = errnoMessage(err);
+            if (outFlush(&out)) |_| {} else |flush_err| {
+                return reportStdoutError(flush_err);
+            }
+            eprintf("cat: {s}: {s}\n", .{name, err_msg});
             return false;
         };
         if (n == 0) break;
         var i: usize = 0;
         while (i < n) : (i += 1) {
             const b = buf[i];
-            if (at_line_start) {
+            if (state.at_line_start) {
                 if (b == '\n') {
-                    if (squeeze_blank and last_blank) {
+                    if (opt.squeeze_blank and state.blank_run) {
                         continue;
                     }
-                    if (number and !number_nonblank) {
-                        emitLineNumber(line_no);
-                        line_no += 1;
+                    if (opt.number_mode == .all) {
+                        if (emitLineNumber(&out, &state.line_no)) |_| {} else |err| {
+                            return reportStdoutError(err);
+                        }
                     }
-                    if (show_ends) writeByte('$');
-                    writeByte('\n');
-                    last_blank = true;
-                    at_line_start = true;
+                    if (opt.show_ends) {
+                        if (outWrite(&out, "$")) |_| {} else |err| {
+                            return reportStdoutError(err);
+                        }
+                    }
+                    if (outWrite(&out, "\n")) |_| {} else |err| {
+                        return reportStdoutError(err);
+                    }
+                    state.blank_run = true;
+                    state.at_line_start = true;
                     continue;
                 }
-                if (number_nonblank) {
-                    emitLineNumber(line_no);
-                    line_no += 1;
-                } else if (number) {
-                    emitLineNumber(line_no);
-                    line_no += 1;
+                if (opt.squeeze_blank) {
+                    state.blank_run = false;
                 }
-                at_line_start = false;
-                last_blank = false;
+                if (opt.number_mode != .none) {
+                    if (emitLineNumber(&out, &state.line_no)) |_| {} else |err| {
+                        return reportStdoutError(err);
+                    }
+                }
+                state.at_line_start = false;
             }
 
             if (b == '\n') {
-                if (show_ends) writeByte('$');
-                writeByte('\n');
-                at_line_start = true;
-                last_blank = true;
+                if (opt.show_ends) {
+                    if (outWrite(&out, "$")) |_| {} else |err| {
+                        return reportStdoutError(err);
+                    }
+                }
+                if (outWrite(&out, "\n")) |_| {} else |err| {
+                    return reportStdoutError(err);
+                }
+                state.at_line_start = true;
                 continue;
             }
-            emitVisualByte(b, show_tabs, show_nonprint);
+            if (emitVisibleByte(&out, b, opt)) |_| {} else |err| {
+                return reportStdoutError(err);
+            }
         }
+    }
+    if (outFlush(&out)) |_| {} else |err| {
+        return reportStdoutError(err);
     }
     return true;
 }
 
-fn usage() void {
-    eprintf("usage: cat [-benstuv] [file ...]\n", .{});
+fn catFd(fd: c_int, name: []const u8, opt: *const CatOptions, state: *CatState) bool {
+    if (!needsProcessing(opt)) {
+        return catPlain(fd, name);
+    }
+    return catStream(fd, name, opt, state);
 }
 
 pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
     var it = args.Args.init(argc, argv);
     _ = it.next();
 
-    var number = false;
-    var number_nonblank = false;
-    var squeeze_blank = false;
-    var show_ends = false;
-    var show_tabs = false;
-    var show_nonprint = false;
+    var opt = CatOptions{
+        .number_mode = .none,
+        .squeeze_blank = false,
+        .show_ends = false,
+        .show_tabs = false,
+        .show_nonprint = false,
+        .unbuffered = false,
+    };
+    var state = CatState{
+        .line_no = 1,
+        .at_line_start = true,
+        .blank_run = false,
+    };
 
     var files = std.ArrayList([]const u8).init(mem.allocator);
     defer files.deinit();
@@ -136,30 +280,40 @@ pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
         if (std.mem.eql(u8, arg, "--")) {
             while (it.next()) |rest| {
                 const v = args.zslice(rest);
-                files.append(v) catch {};
+                if (files.append(v)) |_| {} else |_| {
+                    eprintf("cat: out of memory\n", .{});
+                    return 1;
+                }
             }
             break;
         }
         if (arg[0] != '-' or arg.len == 1) {
-            files.append(arg) catch {};
+            if (files.append(arg)) |_| {} else |_| {
+                eprintf("cat: out of memory\n", .{});
+                return 1;
+            }
             continue;
         }
         var ok = true;
         for (arg[1..]) |ch| {
             switch (ch) {
-                'b' => number_nonblank = true,
+                'b' => opt.number_mode = .nonblank,
                 'e' => {
-                    show_ends = true;
-                    show_nonprint = true;
+                    opt.show_ends = true;
+                    opt.show_nonprint = true;
                 },
-                'n' => number = true,
-                's' => squeeze_blank = true,
+                'n' => {
+                    if (opt.number_mode != .nonblank) {
+                        opt.number_mode = .all;
+                    }
+                },
+                's' => opt.squeeze_blank = true,
                 't' => {
-                    show_tabs = true;
-                    show_nonprint = true;
+                    opt.show_tabs = true;
+                    opt.show_nonprint = true;
                 },
-                'u' => {},
-                'v' => show_nonprint = true,
+                'u' => opt.unbuffered = true,
+                'v' => opt.show_nonprint = true,
                 else => {
                     ok = false;
                     break;
@@ -173,31 +327,29 @@ pub export fn app_main(argc: c_int, argv: [*]?[*:0]u8) callconv(.C) c_int {
     }
 
     if (files.items.len == 0) {
-        if (!cat_fd(constants.fd.stdin, "-", number, number_nonblank, squeeze_blank, show_ends, show_tabs, show_nonprint)) {
-            return 1;
-        }
-        return 0;
+        return if (catFd(constants.fd.stdin, "-", &opt, &state)) 0 else 1;
     }
 
     var failed = false;
     for (files.items) |path| {
         if (std.mem.eql(u8, path, "-")) {
-            if (!cat_fd(constants.fd.stdin, "-", number, number_nonblank, squeeze_blank, show_ends, show_tabs, show_nonprint)) {
+            if (!catFd(constants.fd.stdin, "-", &opt, &state)) {
                 failed = true;
             }
             continue;
         }
         const zpath = mem.allocator.dupeZ(u8, path) catch {
+            eprintf("cat: out of memory\n", .{});
             failed = true;
             continue;
         };
         defer mem.allocator.free(zpath);
-        const fd = fs.openZ(zpath, constants.open.O_RDONLY, null) catch {
-            eprintf("cat: {s}: open failed\n", .{path});
+        const fd = fs.openZ(zpath, constants.open.O_RDONLY, null) catch |err| {
+            eprintf("cat: {s}: {s}\n", .{path, errnoMessage(err)});
             failed = true;
             continue;
         };
-        if (!cat_fd(fd, path, number, number_nonblank, squeeze_blank, show_ends, show_tabs, show_nonprint)) {
+        if (!catFd(fd, path, &opt, &state)) {
             failed = true;
         }
         fs.close(fd) catch {};
