@@ -4,3 +4,4 @@
 
 - Updated mainline true/false to ignore arguments and return BSD-compatible exit codes.
 - Updated mainline and TinyGo sleep to BSD semantics (single seconds operand, BSD-style errors, safe time_t conversion).
+- Updated `applets/mainline/head` to match BSD head options (-n/-c/-q/-v and legacy -N), headers, and I/O/error handling.
