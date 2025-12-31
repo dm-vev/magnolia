@@ -752,13 +752,18 @@ static int handle_conversion(struct format_spec *spec, struct arg_state *state, 
         if (missing || !arg || arg[0] == '\0') {
             ch = 0;
         } else if (arg[0] == '\\') {
-            size_t idx = 1;
-            bool dummy_stop = false;
-            unsigned char out = 0;
-            if (parse_escape(arg, &idx, &out, &dummy_stop, false)) {
-                ch = out;
+            if (arg[1] == '\0') {
+                /* Match BSD printf: a trailing backslash yields a literal backslash. */
+                ch = '\\';
             } else {
-                ch = 0;
+                size_t idx = 1;
+                bool dummy_stop = false;
+                unsigned char out = 0;
+                if (parse_escape(arg, &idx, &out, &dummy_stop, false)) {
+                    ch = out;
+                } else {
+                    ch = 0;
+                }
             }
         } else {
             bool ok = false;
