@@ -120,13 +120,19 @@ static int du_walk(const char *path, bool all, bool summary, unsigned long long 
             }
             char *child = join_path(path, ent->d_name);
             if (!child) {
+                /* Preserve errno from join_path in case closedir overwrites it. */
+                int err = errno;
                 (void)closedir(dir);
+                errno = err;
                 return -1;
             }
             unsigned long long child_blocks = 0;
             if (du_walk(child, all, summary, &child_blocks) != 0) {
+                /* Preserve errno from child traversal before cleanup. */
+                int err = errno;
                 free(child);
                 (void)closedir(dir);
+                errno = err;
                 return -1;
             }
             if (ULLONG_MAX - total < child_blocks) {
