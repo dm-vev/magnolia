@@ -208,7 +208,10 @@ int main(int argc, char **argv)
         }
 
         if (!is_stdin) {
-            (void)close(fd);
+            if (close(fd) != 0) {
+                eprintf("cksum: %s: %s\n", name ? name : "(null)", strerror(errno));
+                failed = 1;
+            }
         }
     }
 

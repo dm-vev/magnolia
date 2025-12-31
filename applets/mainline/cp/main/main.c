@@ -151,7 +151,38 @@ static int copy_file(const char *src, const char *dst, bool force)
     return result;
 }
 
-static int copy_tree(const char *src, const char *dst, bool force);
+static int copy_tree(const char *src, const char *dst, const struct stat *src_st, bool force);
+
+static bool is_descendant_dir(const struct stat *src_st, const char *dst)
+{
+    if (!src_st || !dst) {
+        return false;
+    }
+    char *resolved = realpath(dst, NULL);
+    if (!resolved) {
+        return false;
+    }
+
+    bool same = false;
+    for (;;) {
+        struct stat st;
+        if (stat(resolved, &st) != 0) {
+            break;
+        }
+        if (st.st_dev == src_st->st_dev && st.st_ino == src_st->st_ino) {
+            same = true;
+            break;
+        }
+        char *slash = strrchr(resolved, '/');
+        if (!slash || slash == resolved) {
+            break;
+        }
+        *slash = '\0';
+    }
+
+    free(resolved);
+    return same;
+}
 
 static int dst_matches_src(const struct stat *src_st, const char *dst, bool *same)
 {
@@ -188,7 +219,7 @@ static int copy_entry(const char *src, const char *dst, bool recursive, bool for
             errno = EISDIR;
             return -1;
         }
-        return copy_tree(src, dst, force);
+        return copy_tree(src, dst, &st, force);
     }
     return copy_file(src, dst, force);
 }
@@ -209,9 +240,13 @@ static int ensure_dir(const char *path)
     return 0;
 }
 
-static int copy_tree(const char *src, const char *dst, bool force)
+static int copy_tree(const char *src, const char *dst, const struct stat *src_st, bool force)
 {
     if (ensure_dir(dst) != 0) {
+        return -1;
+    }
+    if (is_descendant_dir(src_st, dst)) {
+        errno = EINVAL;
         return -1;
     }
     DIR *dir = opendir(src);

@@ -446,6 +446,14 @@ static int m_elf_load_section(m_elf_t *elf, const uint8_t *pbuf)
     return 0;
 }
 
+#else
+static int m_elf_load_section(m_elf_t *elf, const uint8_t *pbuf)
+{
+    (void)elf;
+    (void)pbuf;
+    return -ENOTSUP;
+}
+
 #endif
 
 static int m_elf_load_segment(m_elf_t *elf, const uint8_t *pbuf)

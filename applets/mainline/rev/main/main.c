@@ -9,6 +9,8 @@
 #include <string.h>
 #include <unistd.h>
 
+/* BSD reference: FreeBSD rev(1). */
+
 struct line_buf {
     unsigned char *data;
     size_t len;
@@ -208,7 +210,10 @@ int main(int argc, char **argv)
         if (rev_fd(fd, path) != 0) {
             status = 1;
         }
-        close(fd);
+        if (close(fd) != 0) {
+            eprintf("rev: %s: %s\n", path, strerror(errno));
+            status = 1;
+        }
     }
 
     return status;

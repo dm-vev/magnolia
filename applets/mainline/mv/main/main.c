@@ -106,6 +106,159 @@ static char *join_path(const char *dir, const char *name)
     return out;
 }
 
+static int split_parent_base(const char *path, char **out_parent, char **out_base)
+{
+    if (path == NULL || path[0] == '\0') {
+        errno = EINVAL;
+        return -1;
+    }
+
+    char *dup = strdup(path);
+    if (dup == NULL) {
+        errno = ENOMEM;
+        return -1;
+    }
+
+    size_t len = strlen(dup);
+    while (len > 1 && dup[len - 1] == '/') {
+        dup[--len] = '\0';
+    }
+
+    char *slash = strrchr(dup, '/');
+    char *parent = NULL;
+    char *base = NULL;
+
+    if (slash == NULL) {
+        parent = strdup(".");
+        base = strdup(dup);
+    } else if (slash == dup) {
+        parent = strdup("/");
+        base = strdup(dup + 1);
+    } else {
+        *slash = '\0';
+        parent = strdup(dup);
+        base = strdup(slash + 1);
+    }
+
+    free(dup);
+
+    if (parent == NULL || base == NULL) {
+        free(parent);
+        free(base);
+        errno = ENOMEM;
+        return -1;
+    }
+
+    *out_parent = parent;
+    *out_base = base;
+    return 0;
+}
+
+static char *resolve_missing_path(const char *path)
+{
+    char *parent = NULL;
+    char *base = NULL;
+    if (split_parent_base(path, &parent, &base) != 0) {
+        return NULL;
+    }
+
+    char *parent_real = realpath(parent, NULL);
+    int saved_errno = errno;
+    free(parent);
+    if (parent_real == NULL) {
+        free(base);
+        errno = saved_errno;
+        return NULL;
+    }
+
+    if (base[0] == '\0') {
+        free(base);
+        return parent_real;
+    }
+
+    size_t plen = strlen(parent_real);
+    size_t blen = strlen(base);
+    bool need_slash = (plen > 0 && parent_real[plen - 1] != '/');
+    if (blen > SIZE_MAX - plen - (need_slash ? 1 : 0) - 1) {
+        free(parent_real);
+        free(base);
+        errno = ENAMETOOLONG;
+        return NULL;
+    }
+    size_t total = plen + (need_slash ? 1 : 0) + blen + 1;
+    char *full = (char *)malloc(total);
+    if (full == NULL) {
+        free(parent_real);
+        free(base);
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    memcpy(full, parent_real, plen);
+    size_t off = plen;
+    if (need_slash) {
+        full[off++] = '/';
+    }
+    memcpy(full + off, base, blen);
+    full[off + blen] = '\0';
+
+    free(parent_real);
+    free(base);
+    return full;
+}
+
+static bool path_is_descendant(const char *ancestor, const char *path)
+{
+    if (ancestor == NULL || path == NULL) {
+        return false;
+    }
+
+    size_t alen = strlen(ancestor);
+    if (alen == 0) {
+        return false;
+    }
+
+    if (strcmp(ancestor, "/") == 0) {
+        return path[0] == '/';
+    }
+
+    if (strncmp(path, ancestor, alen) != 0) {
+        return false;
+    }
+    if (path[alen] == '\0') {
+        return true;
+    }
+    return path[alen] == '/';
+}
+
+static bool is_descendant_dir(const char *src, const char *dst)
+{
+    if (src == NULL || dst == NULL) {
+        return false;
+    }
+
+    char *src_real = realpath(src, NULL);
+    if (src_real == NULL) {
+        return false;
+    }
+
+    char *dst_real = realpath(dst, NULL);
+    if (dst_real == NULL) {
+        if (errno == ENOENT || errno == ENOTDIR) {
+            dst_real = resolve_missing_path(dst);
+        }
+    }
+    if (dst_real == NULL) {
+        free(src_real);
+        return false;
+    }
+
+    bool result = path_is_descendant(src_real, dst_real);
+    free(src_real);
+    free(dst_real);
+    return result;
+}
+
 static int copy_file(const char *src, const char *dst, bool force)
 {
     if (force) {
@@ -179,8 +332,12 @@ static int rm_tree(const char *path)
             return -1;
         }
         struct dirent *ent;
-        errno = 0;
-        while ((ent = readdir(dir)) != NULL) {
+        while (1) {
+            errno = 0;
+            ent = readdir(dir);
+            if (ent == NULL) {
+                break;
+            }
             if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
                 continue;
             }
@@ -317,6 +474,11 @@ static int mv_entry(const char *src, const char *dst, bool force)
 
 static int mv_tree(const char *src, const char *dst, bool force)
 {
+    /* Prevent infinite recursion when the destination is inside the source tree. */
+    if (is_descendant_dir(src, dst)) {
+        errno = EINVAL;
+        return -1;
+    }
     if (ensure_dir(dst) != 0) {
         return -1;
     }
@@ -326,8 +488,12 @@ static int mv_tree(const char *src, const char *dst, bool force)
     }
     int failed = 0;
     struct dirent *ent;
-    errno = 0;
-    while ((ent = readdir(dir)) != NULL) {
+    while (1) {
+        errno = 0;
+        ent = readdir(dir);
+        if (ent == NULL) {
+            break;
+        }
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
             continue;
         }

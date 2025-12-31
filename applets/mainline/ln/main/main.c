@@ -194,9 +194,13 @@ static int rm_tree(const char *path)
 
     int rc = 0;
     int saved_errno = 0;
-    errno = 0;
     struct dirent *ent;
-    while ((ent = readdir(dir)) != NULL) {
+    while (1) {
+        errno = 0;
+        ent = readdir(dir);
+        if (ent == NULL) {
+            break;
+        }
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
             continue;
         }

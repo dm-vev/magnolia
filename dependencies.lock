@@ -48,5 +48,5 @@ direct_dependencies:
 - espressif/elf_loader
 - espressif/esp_lcd_qemu_rgb
 manifest_hash: 71b1a2fa1ac56b4161b4acb25b5994ab9ff417332c1841dd077ce7e700889a5a
-target: esp32s3
+target: esp32p4
 version: 2.0.0

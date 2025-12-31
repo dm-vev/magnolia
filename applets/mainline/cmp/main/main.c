@@ -87,6 +87,10 @@ static int parse_skip(const char *s, uint64_t *out)
     if (s == NULL || *s == '\0') {
         return -1;
     }
+    /* BSD cmp offsets are unsigned decimal; reject signs explicitly. */
+    if (*s == '+' || *s == '-') {
+        return -1;
+    }
     errno = 0;
     char *end = NULL;
     unsigned long long value = strtoull(s, &end, 10);

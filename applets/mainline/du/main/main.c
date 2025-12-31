@@ -37,9 +37,59 @@ static void eprintf(const char *fmt, ...)
     (void)write(STDERR_FILENO, buf, len);
 }
 
+static int write_all(int fd, const void *buf, size_t len)
+{
+    const unsigned char *p = (const unsigned char *)buf;
+    size_t off = 0;
+    while (off < len) {
+        ssize_t w = write(fd, p + off, len - off);
+        if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (w == 0) {
+            errno = EIO;
+            return -1;
+        }
+        off += (size_t)w;
+    }
+    return 0;
+}
+
+static int write_count_line(unsigned long long blocks, const char *path)
+{
+    char buf[64];
+    int n = snprintf(buf, sizeof(buf), "%llu\t", blocks);
+    if (n < 0 || (size_t)n >= sizeof(buf)) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    if (write_all(STDOUT_FILENO, buf, (size_t)n) != 0) {
+        return -1;
+    }
+    if (path && write_all(STDOUT_FILENO, path, strlen(path)) != 0) {
+        return -1;
+    }
+    if (write_all(STDOUT_FILENO, "\n", 1) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static bool streq(const char *a, const char *b)
 {
     return a && b && strcmp(a, b) == 0;
+}
+
+static int lstat_compat(const char *path, struct stat *st)
+{
+#ifdef ESP_PLATFORM
+    return stat(path, st);
+#else
+    return lstat(path, st);
+#endif
 }
 
 static char *join_path(const char *dir, const char *name)
@@ -99,10 +149,15 @@ static unsigned long long blocks_1k(off_t size)
     return (unsigned long long)blocks;
 }
 
-static int du_walk(const char *path, bool all, bool summary, unsigned long long *out_blocks)
+static int du_walk(const char *path, bool all, bool summary, unsigned long long *out_blocks,
+                   bool *out_stdout_error)
 {
+    if (out_stdout_error) {
+        *out_stdout_error = false;
+    }
+
     struct stat st;
-    if (lstat(path, &st) != 0) {
+    if (lstat_compat(path, &st) != 0) {
         return -1;
     }
 
@@ -113,8 +168,12 @@ static int du_walk(const char *path, bool all, bool summary, unsigned long long 
             return -1;
         }
         struct dirent *ent;
-        errno = 0;
-        while ((ent = readdir(dir)) != NULL) {
+        while (1) {
+            errno = 0;
+            ent = readdir(dir);
+            if (ent == NULL) {
+                break;
+            }
             if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
                 continue;
             }
@@ -127,12 +186,16 @@ static int du_walk(const char *path, bool all, bool summary, unsigned long long 
                 return -1;
             }
             unsigned long long child_blocks = 0;
-            if (du_walk(child, all, summary, &child_blocks) != 0) {
+            bool child_stdout_error = false;
+            if (du_walk(child, all, summary, &child_blocks, &child_stdout_error) != 0) {
                 /* Preserve errno from child traversal before cleanup. */
                 int err = errno;
                 free(child);
                 (void)closedir(dir);
                 errno = err;
+                if (out_stdout_error) {
+                    *out_stdout_error = child_stdout_error;
+                }
                 return -1;
             }
             if (ULLONG_MAX - total < child_blocks) {
@@ -141,7 +204,16 @@ static int du_walk(const char *path, bool all, bool summary, unsigned long long 
                 total += child_blocks;
             }
             if (all && !summary) {
-                printf("%llu\t%s\n", child_blocks, child);
+                if (write_count_line(child_blocks, child) != 0) {
+                    int err = errno;
+                    free(child);
+                    (void)closedir(dir);
+                    errno = err;
+                    if (out_stdout_error) {
+                        *out_stdout_error = true;
+                    }
+                    return -1;
+                }
             }
             free(child);
         }
@@ -206,11 +278,19 @@ int main(int argc, char **argv)
     if (optind >= argc) {
         const char *path = ".";
         unsigned long long blocks = 0;
-        if (du_walk(path, all, summary, &blocks) != 0) {
-            eprintf("du: %s: %s\n", path, strerror(errno));
+        bool stdout_error = false;
+        if (du_walk(path, all, summary, &blocks, &stdout_error) != 0) {
+            if (stdout_error) {
+                eprintf("du: stdout: %s\n", strerror(errno));
+            } else {
+                eprintf("du: %s: %s\n", path, strerror(errno));
+            }
             return 1;
         }
-        printf("%llu\t%s\n", blocks, path);
+        if (write_count_line(blocks, path) != 0) {
+            eprintf("du: stdout: %s\n", strerror(errno));
+            return 1;
+        }
         return 0;
     }
 
@@ -220,12 +300,20 @@ int main(int argc, char **argv)
             continue;
         }
         unsigned long long blocks = 0;
-        if (du_walk(path, all, summary, &blocks) != 0) {
+        bool stdout_error = false;
+        if (du_walk(path, all, summary, &blocks, &stdout_error) != 0) {
+            if (stdout_error) {
+                eprintf("du: stdout: %s\n", strerror(errno));
+                return 1;
+            }
             eprintf("du: %s: %s\n", path, strerror(errno));
             failed = 1;
             continue;
         }
-        printf("%llu\t%s\n", blocks, path);
+        if (write_count_line(blocks, path) != 0) {
+            eprintf("du: stdout: %s\n", strerror(errno));
+            return 1;
+        }
     }
     return failed ? 1 : 0;
 }

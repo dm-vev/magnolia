@@ -49,6 +49,15 @@ static int streq(const char *a, const char *b)
     return a && b && strcmp(a, b) == 0;
 }
 
+static int lstat_compat(const char *path, struct stat *st)
+{
+#ifdef ESP_PLATFORM
+    return stat(path, st);
+#else
+    return lstat(path, st);
+#endif
+}
+
 static void print_help(void)
 {
     printf("usage: df [OPTION]... [FILE]...\n");
@@ -118,7 +127,7 @@ static int usage_walk(const char *path, uint64_t *out_bytes)
     }
 
     struct stat st;
-    if (lstat(path, &st) != 0) {
+    if (lstat_compat(path, &st) != 0) {
         return -1;
     }
 
@@ -140,20 +149,30 @@ static int usage_walk(const char *path, uint64_t *out_bytes)
             return -1;
         }
         struct dirent *ent;
-        errno = 0;
-        while ((ent = readdir(dir)) != NULL) {
+        while (1) {
+            errno = 0;
+            ent = readdir(dir);
+            if (ent == NULL) {
+                break;
+            }
             if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
                 continue;
             }
             char *child = join_path(path, ent->d_name);
             if (child == NULL) {
+                /* closedir() may overwrite errno; preserve the failure. */
+                int err = errno;
                 (void)closedir(dir);
+                errno = err;
                 return -1;
             }
             uint64_t child_bytes = 0;
             if (usage_walk(child, &child_bytes) != 0) {
+                /* closedir() may overwrite errno; preserve the failure. */
+                int err = errno;
                 free(child);
                 (void)closedir(dir);
+                errno = err;
                 return -1;
             }
             /* Clamp on overflow to keep accounting monotonic. */
@@ -165,7 +184,10 @@ static int usage_walk(const char *path, uint64_t *out_bytes)
             free(child);
         }
         if (errno != 0) {
+            /* closedir() may overwrite errno; preserve the failure. */
+            int err = errno;
             (void)closedir(dir);
+            errno = err;
             return -1;
         }
         (void)closedir(dir);

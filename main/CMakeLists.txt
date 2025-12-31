@@ -238,6 +238,7 @@ set(APP_PRIV_REQUIRES
     newlib
     esp_timer
     esp_partition
+    esp_mm
     esp_psram
     esp_driver_gpio
     esp_driver_usb_serial_jtag

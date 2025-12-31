@@ -4,6 +4,15 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <stdbool.h>
+
+/*
+ * BSD reference: FreeBSD sh(1) built-in cd
+ *
+ * Behavior notes:
+ * - With no argument or an empty string, use $HOME and fall back to "/".
+ * - "cd -" changes to $OLDPWD and prints the new directory on success.
+ */
 
 static void eprintf(const char *fmt, ...)
 {
@@ -22,9 +31,31 @@ static void eprintf(const char *fmt, ...)
     (void)write(STDERR_FILENO, buf, len);
 }
 
+static int write_all(int fd, const void *buf, size_t len)
+{
+    const unsigned char *p = (const unsigned char *)buf;
+    size_t off = 0;
+    while (off < len) {
+        ssize_t w = write(fd, p + off, len - off);
+        if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (w == 0) {
+            errno = EIO;
+            return -1;
+        }
+        off += (size_t)w;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     const char *path = NULL;
+    bool print_path = false;
 
     if (argc > 2) {
         eprintf("cd: too many arguments\n");
@@ -42,7 +73,7 @@ int main(int argc, char **argv)
             eprintf("cd: OLDPWD not set\n");
             return 1;
         }
-        printf("%s\n", path);
+        print_path = true;
     } else {
         path = argv[1];
     }
@@ -50,6 +81,15 @@ int main(int argc, char **argv)
     if (chdir(path) != 0) {
         eprintf("cd: %s: %s\n", path, strerror(errno));
         return 1;
+    }
+
+    if (print_path) {
+        size_t len = strlen(path);
+        if ((len > 0 && write_all(STDOUT_FILENO, path, len) != 0) ||
+            write_all(STDOUT_FILENO, "\n", 1) != 0) {
+            eprintf("cd: stdout: %s\n", strerror(errno));
+            return 1;
+        }
     }
     return 0;
 }

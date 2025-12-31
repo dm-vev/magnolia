@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "esp_cache.h"
 #include "esp_heap_caps.h"
 
 void m_arch_task_init_stack(void *stack_top,
@@ -18,15 +19,38 @@ void m_arch_task_init_stack(void *stack_top,
 
 void m_arch_cache_flush(void *addr, size_t size)
 {
-    (void)addr;
-    (void)size;
+    if (addr && size) {
+        (void)esp_cache_msync(addr,
+                              size,
+                              ESP_CACHE_MSYNC_FLAG_DIR_C2M |
+                                  ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    }
     m_arch_memory_barrier();
 }
 
 void m_arch_cache_invalidate(void *addr, size_t size)
 {
-    (void)addr;
-    (void)size;
+    if (addr && size) {
+        size_t line = esp_cache_get_line_size_by_addr(addr);
+        if (line) {
+            uintptr_t start = (uintptr_t)addr;
+            uintptr_t end = 0;
+            if (!__builtin_add_overflow(start, size, &end)) {
+                uintptr_t aligned_start = start & ~(uintptr_t)(line - 1u);
+                uintptr_t aligned_end = (end + line - 1u) & ~(uintptr_t)(line - 1u);
+                size_t aligned_size = (aligned_end > aligned_start)
+                                          ? (size_t)(aligned_end - aligned_start)
+                                          : 0;
+                if (aligned_size) {
+                    /* Sync instruction cache for freshly-written code. */
+                    (void)esp_cache_msync((void *)aligned_start,
+                                          aligned_size,
+                                          ESP_CACHE_MSYNC_FLAG_DIR_M2C |
+                                              ESP_CACHE_MSYNC_FLAG_TYPE_INST);
+                }
+            }
+        }
+    }
     m_arch_memory_barrier();
 }
 

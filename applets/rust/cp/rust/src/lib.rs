@@ -177,6 +177,10 @@ fn main_inner(args: Args) -> i32 {
     };
     let dest_is_dir = match fs::is_dir(dest_str) {
         Ok(v) => v,
+        Err(err) if err.errno == ENOENT => {
+            // Missing destination is allowed for a single source copy.
+            false
+        }
         Err(err) => {
             eprintln!("cp: {}: errno={}", dest_str, err.errno);
             return 1;

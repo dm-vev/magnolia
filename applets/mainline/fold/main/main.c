@@ -18,7 +18,7 @@ struct fold_buffer {
 struct fold_state {
     struct fold_buffer buf;
     size_t col;
-    ssize_t last_blank;
+    size_t last_blank; /* SIZE_MAX means no blank seen. */
 };
 
 enum fold_error {
@@ -119,7 +119,11 @@ static int buffer_push(struct fold_buffer *buf, unsigned char c)
 static size_t next_column(size_t col, unsigned char c, bool count_bytes)
 {
     /* TODO: If Magnolia adds multibyte locales, fold should account for display width. */
+    if (!count_bytes && c == '\b') {
+        return col > 0 ? col - 1 : 0;
+    }
     if (col == SIZE_MAX) {
+        /* Saturate to avoid size_t wrap on very long lines. */
         return SIZE_MAX;
     }
     if (count_bytes) {
@@ -134,21 +138,18 @@ static size_t next_column(size_t col, unsigned char c, bool count_bytes)
         size_t next = col + add;
         return next;
     }
-    if (c == '\b') {
-        return col > 0 ? col - 1 : 0;
-    }
     return col + 1;
 }
 
 static void recompute_state(struct fold_state *st, bool count_bytes, bool break_spaces)
 {
     st->col = 0;
-    st->last_blank = -1;
+    st->last_blank = SIZE_MAX;
     for (size_t i = 0; i < st->buf.len; ++i) {
         unsigned char c = st->buf.data[i];
         st->col = next_column(st->col, c, count_bytes);
         if (break_spaces && (c == ' ' || c == '\t')) {
-            st->last_blank = (ssize_t)i;
+            st->last_blank = i;
         }
     }
 }
@@ -197,16 +198,16 @@ static int fold_fd(int fd,
                 }
                 st.buf.len = 0;
                 st.col = 0;
-                st.last_blank = -1;
+                st.last_blank = SIZE_MAX;
                 continue;
             }
 
             while (1) {
                 size_t next = next_column(st.col, c, count_bytes);
                 if (st.col > 0 && next > width) {
-                    if (break_spaces && st.last_blank >= 0) {
+                    if (break_spaces && st.last_blank != SIZE_MAX) {
                         /* With -s, fold at the last blank and drop it. */
-                        size_t break_at = (size_t)st.last_blank;
+                        size_t break_at = st.last_blank;
                         if (emit_line(st.buf.data, break_at, true) != 0) {
                             *err = FOLD_WRITE;
                             goto out;
@@ -225,7 +226,7 @@ static int fold_fd(int fd,
                     }
                     st.buf.len = 0;
                     st.col = 0;
-                    st.last_blank = -1;
+                    st.last_blank = SIZE_MAX;
                 }
 
                 if (buffer_push(&st.buf, c) != 0) {
@@ -234,7 +235,7 @@ static int fold_fd(int fd,
                 }
                 st.col = next_column(st.col, c, count_bytes);
                 if (break_spaces && (c == ' ' || c == '\t')) {
-                    st.last_blank = (ssize_t)(st.buf.len - 1);
+                    st.last_blank = st.buf.len - 1;
                 }
                 break;
             }

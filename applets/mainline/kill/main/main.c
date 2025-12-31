@@ -148,35 +148,21 @@ static const sig_name_t k_signal_aliases[] = {
 #endif
 };
 
-static const char *g_signal_names[NSIG];
-static bool g_signal_names_init;
-
-// Build a stable signal number -> name table for BSD-style output.
-static void init_signal_names(void)
-{
-    if (g_signal_names_init) {
-        return;
-    }
-    for (int i = 0; i < NSIG; ++i) {
-        g_signal_names[i] = NULL;
-    }
-    g_signal_names[0] = "0";
-    for (size_t i = 0; i < sizeof(k_signal_names) / sizeof(k_signal_names[0]); ++i) {
-        int sig = k_signal_names[i].num;
-        if (sig > 0 && sig < NSIG && g_signal_names[sig] == NULL) {
-            g_signal_names[sig] = k_signal_names[i].name;
-        }
-    }
-    g_signal_names_init = true;
-}
-
+// Resolve a signal number to its canonical BSD name without mutable globals.
 static const char *sig_name_from_num(int sig)
 {
-    init_signal_names();
     if (sig < 0 || sig >= NSIG) {
         return NULL;
     }
-    return g_signal_names[sig];
+    if (sig == 0) {
+        return "0";
+    }
+    for (size_t i = 0; i < sizeof(k_signal_names) / sizeof(k_signal_names[0]); ++i) {
+        if (k_signal_names[i].num == sig) {
+            return k_signal_names[i].name;
+        }
+    }
+    return NULL;
 }
 
 static bool parse_signal_number(const char *spec, int *out_sig)
@@ -236,7 +222,6 @@ static bool sig_num_from_name(const char *spec, int *out_sig)
         return parse_signal_number(name, out_sig);
     }
 
-    init_signal_names();
     for (size_t i = 0; i < sizeof(k_signal_names) / sizeof(k_signal_names[0]); ++i) {
         if (strcmp(name, k_signal_names[i].name) == 0) {
             *out_sig = k_signal_names[i].num;
@@ -252,22 +237,28 @@ static bool sig_num_from_name(const char *spec, int *out_sig)
     return false;
 }
 
-static void print_signal_list(void)
+static int print_signal_list(void)
 {
-    init_signal_names();
     bool first = true;
     for (int sig = 1; sig < NSIG; ++sig) {
-        const char *name = g_signal_names[sig];
+        const char *name = sig_name_from_num(sig);
         if (!name) {
             continue;
         }
         if (!first) {
-            (void)write(STDOUT_FILENO, " ", 1);
+            if (write_all(STDOUT_FILENO, " ", 1) != 0) {
+                return -1;
+            }
         }
-        (void)write(STDOUT_FILENO, name, strlen(name));
+        if (write_all(STDOUT_FILENO, name, strlen(name)) != 0) {
+            return -1;
+        }
         first = false;
     }
-    (void)write(STDOUT_FILENO, "\n", 1);
+    if (write_all(STDOUT_FILENO, "\n", 1) != 0) {
+        return -1;
+    }
+    return 0;
 }
 
 static void usage(void)
@@ -296,7 +287,10 @@ static bool arg_is_signal_shortopt(const char *arg)
 static int handle_list_mode(int argc, char **argv, int idx)
 {
     if (idx >= argc) {
-        print_signal_list();
+        if (print_signal_list() != 0) {
+            eprintf("kill: stdout: %s\n", strerror(errno));
+            return 1;
+        }
         return 0;
     }
 
@@ -328,13 +322,22 @@ static int handle_list_mode(int argc, char **argv, int idx)
             any_bad = true;
             continue;
         }
-        (void)write(STDOUT_FILENO, name, strlen(name));
+        if (write_all(STDOUT_FILENO, name, strlen(name)) != 0) {
+            eprintf("kill: stdout: %s\n", strerror(errno));
+            return 1;
+        }
         if (i + 1 < argc) {
-            (void)write(STDOUT_FILENO, "\n", 1);
+            if (write_all(STDOUT_FILENO, "\n", 1) != 0) {
+                eprintf("kill: stdout: %s\n", strerror(errno));
+                return 1;
+            }
         }
     }
     if (idx < argc) {
-        (void)write(STDOUT_FILENO, "\n", 1);
+        if (write_all(STDOUT_FILENO, "\n", 1) != 0) {
+            eprintf("kill: stdout: %s\n", strerror(errno));
+            return 1;
+        }
     }
     return any_bad ? 1 : 0;
 }
