@@ -153,11 +153,34 @@ static int copy_file(const char *src, const char *dst, bool force)
 
 static int copy_tree(const char *src, const char *dst, bool force);
 
+static int dst_matches_src(const struct stat *src_st, const char *dst, bool *same)
+{
+    struct stat dst_st;
+    if (stat(dst, &dst_st) != 0) {
+        if (errno == ENOENT) {
+            *same = false;
+            return 0;
+        }
+        return -1;
+    }
+    *same = (src_st->st_dev == dst_st.st_dev && src_st->st_ino == dst_st.st_ino);
+    return 0;
+}
+
 static int copy_entry(const char *src, const char *dst, bool recursive, bool force)
 {
     struct stat st;
     /* TODO: Reduce TOCTOU by using fd-based traversal when OS support is available. */
     if (stat(src, &st) != 0) {
+        return -1;
+    }
+    bool same = false;
+    if (dst_matches_src(&st, dst, &same) != 0) {
+        return -1;
+    }
+    if (same) {
+        /* Refuse to clobber a file by copying it onto itself. */
+        errno = EINVAL;
         return -1;
     }
     if (S_ISDIR(st.st_mode)) {
