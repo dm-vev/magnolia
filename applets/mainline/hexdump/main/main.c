@@ -66,6 +66,39 @@ static int oprintf(const char *fmt, ...)
     return rc;
 }
 
+static int appendf(char *buf, size_t cap, size_t *pos, const char *fmt, ...)
+{
+    if (*pos >= cap) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf + *pos, cap - *pos, fmt, ap);
+    va_end(ap);
+    if (n < 0) {
+        errno = EIO;
+        return -1;
+    }
+    if ((size_t)n >= cap - *pos) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    *pos += (size_t)n;
+    return 0;
+}
+
+static int append_char(char *buf, size_t cap, size_t *pos, char ch)
+{
+    if (*pos >= cap) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    buf[*pos] = ch;
+    (*pos)++;
+    return 0;
+}
+
 static void eprintf(const char *fmt, ...)
 {
     char buf[256];
@@ -208,28 +241,45 @@ static int print_canonical(uint64_t offset, const unsigned char *buf, size_t len
 {
     char line[256];
     size_t pos = 0;
-    pos += (size_t)snprintf(line + pos, sizeof(line) - pos, "%08llx  ", (unsigned long long)offset);
+    if (appendf(line, sizeof(line), &pos, "%08llx  ", (unsigned long long)offset) != 0) {
+        return -1;
+    }
     for (size_t i = 0; i < LINE_BYTES; ++i) {
         if (i < len) {
-            pos += (size_t)snprintf(line + pos, sizeof(line) - pos, "%02x ", buf[i]);
+            if (appendf(line, sizeof(line), &pos, "%02x ", buf[i]) != 0) {
+                return -1;
+            }
         } else {
-            pos += (size_t)snprintf(line + pos, sizeof(line) - pos, "   ");
+            if (appendf(line, sizeof(line), &pos, "   ") != 0) {
+                return -1;
+            }
         }
         if (i == 7) {
-            pos += (size_t)snprintf(line + pos, sizeof(line) - pos, " ");
+            if (appendf(line, sizeof(line), &pos, " ") != 0) {
+                return -1;
+            }
         }
     }
-    pos += (size_t)snprintf(line + pos, sizeof(line) - pos, " |");
+    if (appendf(line, sizeof(line), &pos, " |") != 0) {
+        return -1;
+    }
     for (size_t i = 0; i < LINE_BYTES; ++i) {
         if (i < len) {
             unsigned char b = buf[i];
-            line[pos++] = (b >= 0x20 && b <= 0x7e) ? (char)b : '.';
+            if (append_char(line, sizeof(line), &pos,
+                            (b >= 0x20 && b <= 0x7e) ? (char)b : '.') != 0) {
+                return -1;
+            }
         } else {
-            line[pos++] = ' ';
+            if (append_char(line, sizeof(line), &pos, ' ') != 0) {
+                return -1;
+            }
         }
     }
-    line[pos++] = '|';
-    line[pos++] = '\n';
+    if (append_char(line, sizeof(line), &pos, '|') != 0 ||
+        append_char(line, sizeof(line), &pos, '\n') != 0) {
+        return -1;
+    }
     return write_all(STDOUT_FILENO, line, pos);
 }
 
@@ -237,15 +287,23 @@ static int print_byte_octal(uint64_t offset, const unsigned char *buf, size_t le
 {
     char line[256];
     size_t pos = 0;
-    pos += (size_t)snprintf(line + pos, sizeof(line) - pos, "%08llx ", (unsigned long long)offset);
+    if (appendf(line, sizeof(line), &pos, "%08llx ", (unsigned long long)offset) != 0) {
+        return -1;
+    }
     for (size_t i = 0; i < LINE_BYTES; ++i) {
         if (i < len) {
-            pos += (size_t)snprintf(line + pos, sizeof(line) - pos, " %03o", buf[i]);
+            if (appendf(line, sizeof(line), &pos, " %03o", buf[i]) != 0) {
+                return -1;
+            }
         } else {
-            pos += (size_t)snprintf(line + pos, sizeof(line) - pos, "    ");
+            if (appendf(line, sizeof(line), &pos, "    ") != 0) {
+                return -1;
+            }
         }
     }
-    line[pos++] = '\n';
+    if (append_char(line, sizeof(line), &pos, '\n') != 0) {
+        return -1;
+    }
     return write_all(STDOUT_FILENO, line, pos);
 }
 
@@ -253,17 +311,25 @@ static int print_char(uint64_t offset, const unsigned char *buf, size_t len)
 {
     char line[256];
     size_t pos = 0;
-    pos += (size_t)snprintf(line + pos, sizeof(line) - pos, "%08llx ", (unsigned long long)offset);
+    if (appendf(line, sizeof(line), &pos, "%08llx ", (unsigned long long)offset) != 0) {
+        return -1;
+    }
     for (size_t i = 0; i < LINE_BYTES; ++i) {
         char repr[4];
         if (i < len) {
             render_char(buf[i], repr);
-            pos += (size_t)snprintf(line + pos, sizeof(line) - pos, " %s", repr + 1);
+            if (appendf(line, sizeof(line), &pos, " %s", repr + 1) != 0) {
+                return -1;
+            }
         } else {
-            pos += (size_t)snprintf(line + pos, sizeof(line) - pos, "   ");
+            if (appendf(line, sizeof(line), &pos, "   ") != 0) {
+                return -1;
+            }
         }
     }
-    line[pos++] = '\n';
+    if (append_char(line, sizeof(line), &pos, '\n') != 0) {
+        return -1;
+    }
     return write_all(STDOUT_FILENO, line, pos);
 }
 
@@ -271,28 +337,44 @@ static int print_short(uint64_t offset, const unsigned char *buf, size_t len, en
 {
     char line[256];
     size_t pos = 0;
-    pos += (size_t)snprintf(line + pos, sizeof(line) - pos, "%08llx ", (unsigned long long)offset);
+    if (appendf(line, sizeof(line), &pos, "%08llx ", (unsigned long long)offset) != 0) {
+        return -1;
+    }
     for (size_t i = 0; i < LINE_BYTES; i += 2) {
         if (i + 1 < len) {
             uint16_t word = (uint16_t)buf[i] | ((uint16_t)buf[i + 1] << 8);
             if (mode == F_SHORT_DEC) {
-                pos += (size_t)snprintf(line + pos, sizeof(line) - pos, " %05u", (unsigned)word);
+                if (appendf(line, sizeof(line), &pos, " %05u", (unsigned)word) != 0) {
+                    return -1;
+                }
             } else if (mode == F_SHORT_OCT) {
-                pos += (size_t)snprintf(line + pos, sizeof(line) - pos, " %06o", (unsigned)word);
+                if (appendf(line, sizeof(line), &pos, " %06o", (unsigned)word) != 0) {
+                    return -1;
+                }
             } else {
-                pos += (size_t)snprintf(line + pos, sizeof(line) - pos, " %04x", (unsigned)word);
+                if (appendf(line, sizeof(line), &pos, " %04x", (unsigned)word) != 0) {
+                    return -1;
+                }
             }
         } else {
             if (mode == F_SHORT_DEC) {
-                pos += (size_t)snprintf(line + pos, sizeof(line) - pos, "      ");
+                if (appendf(line, sizeof(line), &pos, "      ") != 0) {
+                    return -1;
+                }
             } else if (mode == F_SHORT_OCT) {
-                pos += (size_t)snprintf(line + pos, sizeof(line) - pos, "       ");
+                if (appendf(line, sizeof(line), &pos, "       ") != 0) {
+                    return -1;
+                }
             } else {
-                pos += (size_t)snprintf(line + pos, sizeof(line) - pos, "     ");
+                if (appendf(line, sizeof(line), &pos, "     ") != 0) {
+                    return -1;
+                }
             }
         }
     }
-    line[pos++] = '\n';
+    if (append_char(line, sizeof(line), &pos, '\n') != 0) {
+        return -1;
+    }
     return write_all(STDOUT_FILENO, line, pos);
 }
 
