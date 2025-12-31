@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -63,6 +64,17 @@ static void eprintf(const char *fmt, ...)
     (void)write_all(STDERR_FILENO, buf, len);
 }
 
+static ssize_t read_retry(int fd, void *buf, size_t len)
+{
+    while (1) {
+        ssize_t r = read(fd, buf, len);
+        if (r < 0 && errno == EINTR) {
+            continue;
+        }
+        return r;
+    }
+}
+
 static int size_mul(size_t a, size_t b, size_t *out)
 {
     if (a != 0 && b > SIZE_MAX / a) {
@@ -102,6 +114,19 @@ static int append_fmt(char *buf, size_t cap, size_t *pos, const char *fmt, ...)
     return 0;
 }
 
+static uint64_t off_t_max(void)
+{
+    /* Compute the maximum representable positive off_t to avoid truncation. */
+    if ((off_t)-1 > 0) {
+        return (uint64_t)~(off_t)0;
+    }
+    size_t bits = sizeof(off_t) * CHAR_BIT;
+    if (bits >= sizeof(uint64_t) * CHAR_BIT) {
+        return UINT64_MAX;
+    }
+    return (uint64_t)((1ULL << (bits - 1)) - 1);
+}
+
 static int calc_line_capacity(int columns, int group, size_t *out)
 {
     if (columns <= 0) {
@@ -138,6 +163,21 @@ static int calc_line_capacity(int columns, int group, size_t *out)
     }
     *out = total;
     return 0;
+}
+
+static int parse_int_silent(const char *s, int fallback)
+{
+    /* Avoid atoi overflow UB; fall back on invalid or out-of-range input. */
+    if (s == NULL || *s == '\0') {
+        return fallback;
+    }
+    errno = 0;
+    char *end = NULL;
+    long value = strtol(s, &end, 10);
+    if (errno != 0 || end == s || *end != '\0' || value < INT_MIN || value > INT_MAX) {
+        return fallback;
+    }
+    return (int)value;
 }
 
 static int parse_token(const char *s, char **end_out, uint64_t *value)
@@ -216,10 +256,15 @@ static int skip_bytes(int fd, uint64_t *skip_left)
     if (*skip_left == 0) {
         return 0;
     }
-    off_t offset = (off_t)(*skip_left);
-    if (lseek(fd, offset, SEEK_CUR) >= 0) {
-        *skip_left = 0;
-        return 0;
+    if (*skip_left <= off_t_max()) {
+        off_t offset = (off_t)(*skip_left);
+        if (lseek(fd, offset, SEEK_CUR) >= 0) {
+            *skip_left = 0;
+            return 0;
+        }
+        if (errno != ESPIPE && errno != EINVAL) {
+            return -1;
+        }
     }
     unsigned char buf[256];
     while (*skip_left > 0) {
@@ -227,9 +272,13 @@ static int skip_bytes(int fd, uint64_t *skip_left)
         if (*skip_left < chunk) {
             chunk = (size_t)*skip_left;
         }
-        ssize_t r = read(fd, buf, chunk);
-        if (r <= 0) {
+        ssize_t r = read_retry(fd, buf, chunk);
+        if (r < 0) {
             return -1;
+        }
+        if (r == 0) {
+            *skip_left = 0;
+            return 0;
         }
         *skip_left -= (uint64_t)r;
     }
@@ -260,7 +309,7 @@ static int reverse_stream(int fd)
 
     char buf[128];
     while (1) {
-        ssize_t r = read(fd, buf, sizeof(buf));
+        ssize_t r = read_retry(fd, buf, sizeof(buf));
         if (r < 0) {
             return -1;
         }
@@ -365,7 +414,7 @@ static int xxd_forward(int fd, uint64_t skip, uint64_t length, bool use_length,
         if (use_length && length < want) {
             want = (size_t)length;
         }
-        ssize_t r = read(fd, buf, want);
+        ssize_t r = read_retry(fd, buf, want);
         if (r < 0) {
             return -1;
         }
@@ -467,13 +516,13 @@ int main(int argc, char **argv)
     while ((opt = getopt(argc, argv, "g:c:l:s:pruh")) != -1) {
         switch (opt) {
         case 'g':
-            group = atoi(optarg);
+            group = parse_int_silent(optarg, 0);
             if (group < 0) {
                 group = 0;
             }
             break;
         case 'c':
-            columns = atoi(optarg);
+            columns = parse_int_silent(optarg, 0);
             if (columns <= 0 || columns > 256) {
                 columns = 16;
             }
