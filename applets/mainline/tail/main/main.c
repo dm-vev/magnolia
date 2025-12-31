@@ -120,7 +120,12 @@ static int read_full(int fd, void *buf, size_t len)
     size_t off = 0;
     while (off < len) {
         ssize_t r = read_retry(fd, p + off, len - off);
-        if (r <= 0) {
+        if (r < 0) {
+            return -1;
+        }
+        if (r == 0) {
+            /* read_full expects the full byte count; EOF is an error here. */
+            errno = EIO;
             return -1;
         }
         off += (size_t)r;
