@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <getopt.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -26,6 +27,8 @@ static void eprintf(const char *fmt, ...)
     (void)write(STDERR_FILENO, buf, len);
 }
 
+/* BSD reference: FreeBSD rm(1). */
+
 static bool confirm_remove(const char *path)
 {
     char prompt[256];
@@ -39,19 +42,37 @@ static bool confirm_remove(const char *path)
     }
 
     char buf[16];
-    ssize_t r = read(STDIN_FILENO, buf, sizeof(buf));
-    if (r <= 0) {
-        return false;
+    while (1) {
+        ssize_t r = read(STDIN_FILENO, buf, sizeof(buf));
+        if (r < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        if (r == 0) {
+            return false;
+        }
+        return (buf[0] == 'y' || buf[0] == 'Y');
     }
-    return (buf[0] == 'y' || buf[0] == 'Y');
 }
 
 static char *join_path(const char *dir, const char *name)
 {
+    if (!dir || !name) {
+        errno = EINVAL;
+        return NULL;
+    }
     size_t dlen = strlen(dir);
     size_t nlen = strlen(name);
     bool need_slash = (dlen > 0 && dir[dlen - 1] != '/');
-    size_t total = dlen + (need_slash ? 1 : 0) + nlen + 1;
+    size_t extra = (need_slash ? 1 : 0) + 1;
+    /* Guard against size_t overflow on long paths. */
+    if (dlen > SIZE_MAX - nlen - extra) {
+        errno = ENAMETOOLONG;
+        return NULL;
+    }
+    size_t total = dlen + nlen + extra;
     char *out = (char *)malloc(total);
     if (!out) {
         errno = ENOMEM;
