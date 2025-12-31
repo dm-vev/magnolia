@@ -9,6 +9,8 @@
 #include <string.h>
 #include <unistd.h>
 
+/* BSD reference: FreeBSD dd(1). */
+
 static void eprintf(const char *fmt, ...)
 {
     char buf[256];
@@ -156,6 +158,7 @@ static int skip_input(int fd, uint64_t blocks, size_t ibs)
     }
     unsigned char *buf = (unsigned char *)malloc(ibs);
     if (!buf) {
+        errno = ENOMEM;
         return -1;
     }
     uint64_t left = blocks;
@@ -193,6 +196,7 @@ static int seek_output(int fd, uint64_t blocks, size_t obs)
     }
     unsigned char *zeros = (unsigned char *)calloc(1, obs);
     if (!zeros) {
+        errno = ENOMEM;
         return -1;
     }
     uint64_t left = blocks;
@@ -246,13 +250,28 @@ int main(int argc, char **argv)
                 eprintf("dd: invalid ibs '%s'\n", val);
                 return 1;
             }
+            /* Prevent size_t truncation in allocations and read sizes. */
+            if (ibs > SIZE_MAX) {
+                eprintf("dd: invalid ibs '%s'\n", val);
+                return 1;
+            }
         } else if (key_len == 3 && strncmp(arg, "obs", 3) == 0) {
             if (parse_size(val, &obs) != 0) {
                 eprintf("dd: invalid obs '%s'\n", val);
                 return 1;
             }
+            /* Prevent size_t truncation in allocations and write sizes. */
+            if (obs > SIZE_MAX) {
+                eprintf("dd: invalid obs '%s'\n", val);
+                return 1;
+            }
         } else if (key_len == 2 && strncmp(arg, "bs", 2) == 0) {
             if (parse_size(val, &bs) != 0) {
+                eprintf("dd: invalid bs '%s'\n", val);
+                return 1;
+            }
+            /* bs maps to both ibs/obs buffer sizes. */
+            if (bs > SIZE_MAX) {
                 eprintf("dd: invalid bs '%s'\n", val);
                 return 1;
             }
