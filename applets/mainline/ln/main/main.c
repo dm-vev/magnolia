@@ -185,6 +185,8 @@ static int rm_tree(const char *path)
     }
 
     int rc = 0;
+    int saved_errno = 0;
+    errno = 0;
     struct dirent *ent;
     while ((ent = readdir(dir)) != NULL) {
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
@@ -202,8 +204,18 @@ static int rm_tree(const char *path)
         }
         free(child);
     }
+    if (rc == 0 && errno != 0) {
+        /* Preserve the directory read error instead of silently proceeding. */
+        rc = -1;
+        saved_errno = errno;
+    } else if (rc != 0) {
+        saved_errno = errno;
+    }
     (void)closedir(dir);
     if (rc != 0) {
+        if (saved_errno != 0) {
+            errno = saved_errno;
+        }
         return -1;
     }
     return rmdir(path);

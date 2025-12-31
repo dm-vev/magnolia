@@ -13,6 +13,8 @@
 #include "esp_partition.h"
 #include "sdkconfig.h"
 
+/* BSD reference: FreeBSD df(1). */
+
 #ifndef CONFIG_MAGNOLIA_LITTLEFS_PARTITION_LABEL
 #define CONFIG_MAGNOLIA_LITTLEFS_PARTITION_LABEL "vfs"
 #endif
@@ -222,7 +224,8 @@ static uint64_t blocks_1k(uint64_t bytes)
     if (bytes == 0) {
         return 0;
     }
-    return (bytes + 1023u) / 1024u;
+    /* Avoid overflow on large values by using div/mod instead of rounding add. */
+    return (bytes / 1024u) + ((bytes % 1024u) != 0u);
 }
 
 static void print_df_line(const char *fs_name,

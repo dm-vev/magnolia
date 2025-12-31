@@ -9,6 +9,8 @@
 #include <string.h>
 #include <unistd.h>
 
+/* BSD reference: FreeBSD cmp(1). */
+
 static void eprintf(const char *fmt, ...)
 {
     char buf[256];
@@ -127,6 +129,37 @@ static int skip_fd(int fd, uint64_t skip)
     return 0;
 }
 
+static int skip_fd_count_lines(int fd, uint64_t skip, uint64_t *line_incr)
+{
+    if (skip == 0) {
+        *line_incr = 0;
+        return 0;
+    }
+
+    /* Count newlines while skipping so line numbers match the original file. */
+    unsigned char buf[4096];
+    uint64_t left = skip;
+    uint64_t lines = 0;
+    while (left > 0) {
+        size_t chunk = left < sizeof(buf) ? (size_t)left : sizeof(buf);
+        ssize_t r = read_retry(fd, buf, chunk);
+        if (r < 0) {
+            return -1;
+        }
+        if (r == 0) {
+            break;
+        }
+        for (ssize_t i = 0; i < r; ++i) {
+            if (buf[i] == '\n') {
+                lines++;
+            }
+        }
+        left -= (uint64_t)r;
+    }
+    *line_incr = lines;
+    return 0;
+}
+
 static int drain_fd(int fd)
 {
     unsigned char buf[4096];
@@ -146,7 +179,9 @@ static int compare_streams(int fd1,
                            int fd2,
                            const char *name2,
                            bool list,
-                           bool silent)
+                           bool silent,
+                           uint64_t byte_pos,
+                           uint64_t line_no)
 {
     unsigned char buf1[4096];
     unsigned char buf2[4096];
@@ -154,8 +189,6 @@ static int compare_streams(int fd1,
     size_t pos1 = 0;
     size_t len2 = 0;
     size_t pos2 = 0;
-    uint64_t byte_pos = 1;
-    uint64_t line_no = 1;
     bool need_line = !list && !silent;
     bool differ = false;
 
@@ -334,7 +367,20 @@ int main(int argc, char **argv)
         close2 = true;
     }
 
-    if (skip_fd(fd1, skip1) != 0) {
+    uint64_t line_incr = 0;
+    /* Line numbers are based on the first file, so count skipped newlines. */
+    if (!list && !silent) {
+        if (skip_fd_count_lines(fd1, skip1, &line_incr) != 0) {
+            eprintf("cmp: %s: %s\n", name1, strerror(errno));
+            if (close1) {
+                (void)close(fd1);
+            }
+            if (close2) {
+                (void)close(fd2);
+            }
+            return 2;
+        }
+    } else if (skip_fd(fd1, skip1) != 0) {
         eprintf("cmp: %s: %s\n", name1, strerror(errno));
         if (close1) {
             (void)close(fd1);
@@ -356,7 +402,9 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    int rc = compare_streams(fd1, name1, fd2, name2, list, silent);
+    uint64_t byte_pos = skip1 + 1;
+    uint64_t line_no = 1 + line_incr;
+    int rc = compare_streams(fd1, name1, fd2, name2, list, silent, byte_pos, line_no);
 
     if (close1) {
         (void)close(fd1);

@@ -208,6 +208,28 @@ static void usage(void)
     eprintf("usage: paste [-s] [-d list] [file ...]\n");
 }
 
+static int delim_buffer_reserve(unsigned char **buf, size_t *cap, size_t need)
+{
+    if (need <= *cap) {
+        return 0;
+    }
+    size_t next = *cap == 0 ? 16 : *cap;
+    while (next < need) {
+        if (next > SIZE_MAX / 2) {
+            errno = ENOMEM;
+            return -1;
+        }
+        next *= 2;
+    }
+    unsigned char *tmp = (unsigned char *)realloc(*buf, next);
+    if (tmp == NULL) {
+        return -1;
+    }
+    *buf = tmp;
+    *cap = next;
+    return 0;
+}
+
 static int parse_delims(const char *spec, unsigned char **out, size_t *out_len)
 {
     *out = NULL;
@@ -229,30 +251,93 @@ static int parse_delims(const char *spec, unsigned char **out, size_t *out_len)
         if (c == '\\') {
             unsigned char next = (unsigned char)spec[i + 1];
             if (next == '\0') {
+                if (len > SIZE_MAX - 1) {
+                    free(buf);
+                    errno = EOVERFLOW;
+                    return -1;
+                }
+                if (delim_buffer_reserve(&buf, &cap, len + 1) != 0) {
+                    free(buf);
+                    return -1;
+                }
                 buf[len++] = '\\';
                 break;
             }
             i++;
             switch (next) {
             case 'n':
+                if (len > SIZE_MAX - 1) {
+                    free(buf);
+                    errno = EOVERFLOW;
+                    return -1;
+                }
+                if (delim_buffer_reserve(&buf, &cap, len + 1) != 0) {
+                    free(buf);
+                    return -1;
+                }
                 buf[len++] = '\n';
                 break;
             case 't':
+                if (len > SIZE_MAX - 1) {
+                    free(buf);
+                    errno = EOVERFLOW;
+                    return -1;
+                }
+                if (delim_buffer_reserve(&buf, &cap, len + 1) != 0) {
+                    free(buf);
+                    return -1;
+                }
                 buf[len++] = '\t';
                 break;
             case '0':
+                if (len > SIZE_MAX - 1) {
+                    free(buf);
+                    errno = EOVERFLOW;
+                    return -1;
+                }
+                if (delim_buffer_reserve(&buf, &cap, len + 1) != 0) {
+                    free(buf);
+                    return -1;
+                }
                 buf[len++] = '\0';
                 break;
             case '\\':
+                if (len > SIZE_MAX - 1) {
+                    free(buf);
+                    errno = EOVERFLOW;
+                    return -1;
+                }
+                if (delim_buffer_reserve(&buf, &cap, len + 1) != 0) {
+                    free(buf);
+                    return -1;
+                }
                 buf[len++] = '\\';
                 break;
             default:
                 // Preserve unknown escapes as literal backslash + character.
+                if (len > SIZE_MAX - 2) {
+                    free(buf);
+                    errno = EOVERFLOW;
+                    return -1;
+                }
+                if (delim_buffer_reserve(&buf, &cap, len + 2) != 0) {
+                    free(buf);
+                    return -1;
+                }
                 buf[len++] = '\\';
                 buf[len++] = next;
                 break;
             }
             continue;
+        }
+        if (len > SIZE_MAX - 1) {
+            free(buf);
+            errno = EOVERFLOW;
+            return -1;
+        }
+        if (delim_buffer_reserve(&buf, &cap, len + 1) != 0) {
+            free(buf);
+            return -1;
         }
         buf[len++] = c;
     }
