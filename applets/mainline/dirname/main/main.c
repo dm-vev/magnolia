@@ -5,6 +5,14 @@
 #include <string.h>
 #include <unistd.h>
 
+/*
+ * BSD reference: FreeBSD dirname(1)
+ *
+ * Behavior notes:
+ * - An empty string yields ".".
+ * - All-slash inputs collapse to a single "/".
+ */
+
 static void eprintf(const char *fmt, ...)
 {
     char buf[256];
@@ -98,8 +106,6 @@ int main(int argc, char **argv)
     const char *path = NULL;
     if (argc == 2) {
         path = argv[1];
-    } else if (argc == 3 && strcmp(argv[1], "--") == 0) {
-        path = argv[2];
     } else {
         usage();
         return 1;
