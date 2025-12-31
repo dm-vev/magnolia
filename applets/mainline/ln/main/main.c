@@ -63,11 +63,19 @@ static bool confirm_overwrite(const char *path)
     }
 
     char buf[16];
-    ssize_t r = read(STDIN_FILENO, buf, sizeof(buf));
-    if (r <= 0) {
-        return false;
+    while (1) {
+        ssize_t r = read(STDIN_FILENO, buf, sizeof(buf));
+        if (r < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        if (r == 0) {
+            return false;
+        }
+        return buf[0] == 'y' || buf[0] == 'Y';
     }
-    return buf[0] == 'y' || buf[0] == 'Y';
 }
 
 static const char *path_basename(const char *path, size_t *out_len)
