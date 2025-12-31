@@ -151,6 +151,9 @@ static int skip_input(int fd, uint64_t blocks, size_t ibs)
     if (lseek(fd, offset, SEEK_CUR) >= 0) {
         return 0;
     }
+    if (errno != ESPIPE && errno != EINVAL) {
+        return -1;
+    }
     unsigned char *buf = (unsigned char *)malloc(ibs);
     if (!buf) {
         return -1;
@@ -159,11 +162,8 @@ static int skip_input(int fd, uint64_t blocks, size_t ibs)
     while (left > 0) {
         ssize_t r = read_retry(fd, buf, ibs);
         if (r <= 0) {
-            if (r == 0) {
-                errno = EIO;
-            }
             free(buf);
-            return -1;
+            return r == 0 ? 0 : -1;
         }
         left--;
     }
@@ -187,6 +187,9 @@ static int seek_output(int fd, uint64_t blocks, size_t obs)
     }
     if (lseek(fd, offset, SEEK_CUR) >= 0) {
         return 0;
+    }
+    if (errno != ESPIPE && errno != EINVAL) {
+        return -1;
     }
     unsigned char *zeros = (unsigned char *)calloc(1, obs);
     if (!zeros) {
