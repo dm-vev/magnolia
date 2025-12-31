@@ -581,11 +581,11 @@ static void *vi_memrchr(const void *s, int c, size_t n)
         return NULL;
     }
 
-    // Use unsigned char for byte-wise comparison
+    // Walk backwards with an index to avoid pointer underflow UB.
     const unsigned char *p = (const unsigned char *)s;
-    for (const unsigned char *i = p + n - 1; i >= p; --i) {
-        if (*i == (unsigned char)c) {
-            return (void *)i;
+    for (size_t i = n; i > 0; --i) {
+        if (p[i - 1] == (unsigned char)c) {
+            return (void *)(p + i - 1);
         }
     }
     return NULL;
