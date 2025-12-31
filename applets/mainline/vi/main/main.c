@@ -335,7 +335,7 @@ struct globals {
 #if ENABLE_FEATURE_VI_DOT_CMD
     char last_modifying_cmd[MAX_INPUT_LEN]; // last modifying cmd for "."
 #endif
-    char get_input_line__buf[MAX_INPUT_LEN]; /* former static */
+    char get_input_line__buf[MAX_INPUT_LEN + 1]; /* room for MAX_INPUT_LEN chars + NUL */
 
     char scr_out_buf[MAX_SCR_COLS + MAX_TABSTOP * 2];
 };
@@ -1259,7 +1259,7 @@ static char *stpcopy(char *dest, const char *src)
 static void colon(char *buf)
 {
     char c, *orig_buf, *buf1, *q, *r;
-    char *fn, cmd[MAX_INPUT_LEN], args[MAX_INPUT_LEN];
+    char *fn, cmd[MAX_INPUT_LEN + 1], args[MAX_INPUT_LEN + 1];
     int i, l, li, ch, b, e;
     int useforce, forced = FALSE;
     int cmd_quit = FALSE;
