@@ -198,7 +198,15 @@ static int ls_dir(const char *path, const ls_opts_t *opts)
         size_t plen = strlen(path);
         bool need_slash = (plen > 0 && path[plen - 1] != '/');
         size_t name_len = strlen(name);
-        size_t extra = (need_slash ? 1 : 0) + name_len + 1;
+        size_t slash = need_slash ? 1 : 0;
+        if (name_len > SIZE_MAX - slash - 1) {
+            errno = ENAMETOOLONG;
+            eprintf("ls: %s/%s: %s\n", path, name, strerror(errno));
+            failed = 1;
+            free(name);
+            continue;
+        }
+        size_t extra = slash + name_len + 1;
         if (plen > SIZE_MAX - extra) {
             errno = ENAMETOOLONG;
             eprintf("ls: %s/%s: %s\n", path, name, strerror(errno));
