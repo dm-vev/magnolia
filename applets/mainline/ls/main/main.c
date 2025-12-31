@@ -37,6 +37,69 @@ static void eprintf(const char *fmt, ...)
     (void)write(STDERR_FILENO, buf, len);
 }
 
+static int write_all(int fd, const void *buf, size_t len)
+{
+    const unsigned char *p = (const unsigned char *)buf;
+    size_t off = 0;
+    while (off < len) {
+        ssize_t w = write(fd, p + off, len - off);
+        if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (w == 0) {
+            errno = EIO;
+            return -1;
+        }
+        off += (size_t)w;
+    }
+    return 0;
+}
+
+static int oprintf(const char *fmt, ...)
+{
+    char stack[256];
+    va_list ap;
+    va_start(ap, fmt);
+    va_list ap2;
+    va_copy(ap2, ap);
+    int n = vsnprintf(stack, sizeof(stack), fmt, ap);
+    va_end(ap);
+    if (n < 0) {
+        va_end(ap2);
+        errno = EIO;
+        return -1;
+    }
+    size_t len = (size_t)n;
+    if (len < sizeof(stack)) {
+        va_end(ap2);
+        return write_all(STDOUT_FILENO, stack, len);
+    }
+    if (len == SIZE_MAX) {
+        va_end(ap2);
+        errno = EOVERFLOW;
+        return -1;
+    }
+    char *buf = (char *)malloc(len + 1);
+    if (buf == NULL) {
+        va_end(ap2);
+        errno = ENOMEM;
+        return -1;
+    }
+    int n2 = vsnprintf(buf, len + 1, fmt, ap2);
+    va_end(ap2);
+    if (n2 < 0 || (size_t)n2 != len) {
+        free(buf);
+        errno = EIO;
+        return -1;
+    }
+    int rc = write_all(STDOUT_FILENO, buf, len);
+    free(buf);
+    return rc;
+}
+
 static int cmp_strptr(const void *a, const void *b)
 {
     const char *const *sa = (const char *const *)a;
@@ -96,7 +159,10 @@ static void mode_string(mode_t mode, char out[11])
 static int ls_print(const char *display, const char *path, const ls_opts_t *opts)
 {
     if (!opts->list_long) {
-        printf("%s\n", display);
+        if (oprintf("%s\n", display) != 0) {
+            eprintf("ls: stdout: %s\n", strerror(errno));
+            return 1;
+        }
         return 0;
     }
 
@@ -117,7 +183,10 @@ static int ls_print(const char *display, const char *path, const ls_opts_t *opts
         strncpy(timebuf, "????????????", sizeof(timebuf) - 1);
     }
 
-    printf("%s %8" PRIdMAX " %s %s\n", mode, (intmax_t)st.st_size, timebuf, display);
+    if (oprintf("%s %8" PRIdMAX " %s %s\n", mode, (intmax_t)st.st_size, timebuf, display) != 0) {
+        eprintf("ls: stdout: %s\n", strerror(errno));
+        return 1;
+    }
     return 0;
 }
 
@@ -146,9 +215,13 @@ static int ls_dir(const char *path, const ls_opts_t *opts)
     size_t count = 0;
     char **names = NULL;
 
-    errno = 0;
     struct dirent *ent;
-    while ((ent = readdir(dir)) != NULL) {
+    while (1) {
+        errno = 0;
+        ent = readdir(dir);
+        if (ent == NULL) {
+            break;
+        }
         if (!opts->all && ent->d_name[0] == '.') {
             continue;
         }
@@ -304,13 +377,19 @@ int main(int argc, char **argv)
             bool ends_with_slash = (plen > 0 && path[plen - 1] == '/');
             if ((ends_with_slash ? stat(path, &st) : lstat_compat(path, &st)) == 0 &&
                 S_ISDIR(st.st_mode) && !opts.list_dirs) {
-                printf("%s:\n", path);
+                if (oprintf("%s:\n", path) != 0) {
+                    eprintf("ls: stdout: %s\n", strerror(errno));
+                    return 1;
+                }
             }
         }
 
         failed |= ls_dir(path, &opts);
         if (n_paths > 1 && i + 1 < n_paths) {
-            printf("\n");
+            if (write_all(STDOUT_FILENO, "\n", 1) != 0) {
+                eprintf("ls: stdout: %s\n", strerror(errno));
+                return 1;
+            }
         }
     }
     return failed ? 1 : 0;
