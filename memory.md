@@ -83,3 +83,4 @@
 - Hardened mainline `ls` stdout handling by routing formatted output through a bounded `oprintf`/`write_all` path and reporting write failures instead of silently succeeding on EIO/EPIPE.
 - Fixed mainline `mv` to reject destinations inside the source tree to avoid recursive self-copy. Cause: directory moves lacked a containment check, allowing `mv src src/subdir` to recurse indefinitely until path or resource limits were hit. Fix: resolve source/destination paths (including non-existent targets) and return `EINVAL` when the destination is a descendant.
 - Updated mainline `uname` to use robust stdout writes and report write errors instead of silently succeeding.
+- Fixed mainline `env` environment-clearing allocation overflow that could under-allocate and OOB-write when the environment has an extreme entry count. Cause: `calloc(count, sizeof(*names))` without guarding `count * sizeof` overflow. Fix: check `SIZE_MAX` and return `EOVERFLOW` before allocating.

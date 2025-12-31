@@ -11,6 +11,14 @@
 
 extern char **environ;
 
+/*
+ * BSD reference: FreeBSD env(1)
+ *
+ * Behavior notes:
+ * - Empty PATH elements are treated as the current directory.
+ * - -S word splitting follows FreeBSD quoting/escape rules.
+ */
+
 static const char *k_default_path = "/usr/bin:/bin";
 
 #ifdef ESP_PLATFORM
@@ -469,6 +477,10 @@ static int clear_environment(void)
     }
     char **names = NULL;
     if (count > 0) {
+        if (count > SIZE_MAX / sizeof(*names)) {
+            errno = EOVERFLOW;
+            return -1;
+        }
         names = (char **)calloc(count, sizeof(*names));
         if (!names) {
             return -1;
