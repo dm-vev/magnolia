@@ -310,6 +310,11 @@ int main(int argc, char **argv)
         const char *final_dst = dst;
         if (dst_is_dir) {
             out = join_path(dst, path_basename(src));
+            if (!out) {
+                eprintf("cp: %s -> %s: %s\n", src, dst ? dst : "", strerror(errno));
+                failed = 1;
+                continue;
+            }
             final_dst = out;
         }
         if (copy_entry(src, final_dst, recursive, force) != 0) {

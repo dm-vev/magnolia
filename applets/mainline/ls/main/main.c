@@ -1,5 +1,6 @@
 #include <dirent.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -16,6 +17,8 @@ typedef struct {
     bool list_long;
     bool list_dirs;
 } ls_opts_t;
+
+/* BSD reference: FreeBSD ls(1). */
 
 static void eprintf(const char *fmt, ...)
 {
@@ -50,6 +53,15 @@ static char *xstrdup(const char *s)
     }
     memcpy(out, s, len);
     return out;
+}
+
+static int lstat_compat(const char *path, struct stat *st)
+{
+#ifdef ESP_PLATFORM
+    return stat(path, st);
+#else
+    return lstat(path, st);
+#endif
 }
 
 static void mode_string(mode_t mode, char out[11])
@@ -89,7 +101,7 @@ static int ls_print(const char *display, const char *path, const ls_opts_t *opts
     }
 
     struct stat st;
-    if (lstat(path, &st) != 0) {
+    if (lstat_compat(path, &st) != 0) {
         eprintf("ls: %s: %s\n", path, strerror(errno));
         return 1;
     }
@@ -105,7 +117,7 @@ static int ls_print(const char *display, const char *path, const ls_opts_t *opts
         strncpy(timebuf, "????????????", sizeof(timebuf) - 1);
     }
 
-    printf("%s %8ld %s %s\n", mode, (long)st.st_size, timebuf, display);
+    printf("%s %8" PRIdMAX " %s %s\n", mode, (intmax_t)st.st_size, timebuf, display);
     return 0;
 }
 
@@ -115,7 +127,7 @@ static int ls_dir(const char *path, const ls_opts_t *opts)
     size_t plen = strlen(path);
     bool ends_with_slash = (plen > 0 && path[plen - 1] == '/');
     /* Preserve BSD behavior: symlinks are listed unless the path ends with '/'. */
-    if ((ends_with_slash ? stat(path, &st) : lstat(path, &st)) != 0) {
+    if ((ends_with_slash ? stat(path, &st) : lstat_compat(path, &st)) != 0) {
         eprintf("ls: %s: %s\n", path, strerror(errno));
         return 1;
     }
@@ -290,7 +302,7 @@ int main(int argc, char **argv)
             struct stat st;
             size_t plen = strlen(path);
             bool ends_with_slash = (plen > 0 && path[plen - 1] == '/');
-            if ((ends_with_slash ? stat(path, &st) : lstat(path, &st)) == 0 &&
+            if ((ends_with_slash ? stat(path, &st) : lstat_compat(path, &st)) == 0 &&
                 S_ISDIR(st.st_mode) && !opts.list_dirs) {
                 printf("%s:\n", path);
             }
