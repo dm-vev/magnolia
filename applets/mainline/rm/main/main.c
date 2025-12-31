@@ -128,6 +128,7 @@ static int rm_path(const char *path, bool recursive, bool force, bool interactiv
         }
 
         struct dirent *ent;
+        errno = 0;
         while ((ent = readdir(dir)) != NULL) {
             if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
                 continue;
@@ -140,6 +141,14 @@ static int rm_path(const char *path, bool recursive, bool force, bool interactiv
             }
             (void)rm_path(child, recursive, force, interactive, failed);
             free(child);
+        }
+        if (errno != 0) {
+            int err = errno;
+            (void)closedir(dir);
+            errno = err;
+            eprintf("rm: %s: %s\n", path, strerror(errno));
+            *failed = 1;
+            return -1;
         }
         (void)closedir(dir);
 
