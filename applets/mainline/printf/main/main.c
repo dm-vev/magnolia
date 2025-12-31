@@ -836,10 +836,27 @@ static int handle_conversion(struct format_spec *spec, struct arg_state *state, 
             }
             switch (spec->length) {
             case LEN_NONE:
-            case LEN_HH:
-            case LEN_H: {
+                {
                 int val = (int)v;
                 if (write_formatted(fmtbuf, val) != 0) {
+                    eprintf("printf: stdout: %s\n", strerror(errno));
+                    return 1;
+                }
+                break;
+            }
+            case LEN_HH: {
+                /* Match C default integer promotions for signed char. */
+                signed char val = (signed char)v;
+                if (write_formatted(fmtbuf, (int)val) != 0) {
+                    eprintf("printf: stdout: %s\n", strerror(errno));
+                    return 1;
+                }
+                break;
+            }
+            case LEN_H: {
+                /* Match C default integer promotions for short. */
+                short val = (short)v;
+                if (write_formatted(fmtbuf, (int)val) != 0) {
                     eprintf("printf: stdout: %s\n", strerror(errno));
                     return 1;
                 }
@@ -897,10 +914,37 @@ static int handle_conversion(struct format_spec *spec, struct arg_state *state, 
             }
             switch (spec->length) {
             case LEN_NONE:
-            case LEN_HH:
-            case LEN_H: {
+                {
                 unsigned int val = (unsigned int)v;
                 if (write_formatted(fmtbuf, val) != 0) {
+                    eprintf("printf: stdout: %s\n", strerror(errno));
+                    return 1;
+                }
+                break;
+            }
+            case LEN_HH: {
+                /* Match C default integer promotions for unsigned char. */
+                unsigned char val = (unsigned char)v;
+#if UCHAR_MAX > INT_MAX
+                unsigned int promoted = (unsigned int)val;
+#else
+                int promoted = (int)val;
+#endif
+                if (write_formatted(fmtbuf, promoted) != 0) {
+                    eprintf("printf: stdout: %s\n", strerror(errno));
+                    return 1;
+                }
+                break;
+            }
+            case LEN_H: {
+                /* Match C default integer promotions for unsigned short. */
+                unsigned short val = (unsigned short)v;
+#if USHRT_MAX > INT_MAX
+                unsigned int promoted = (unsigned int)val;
+#else
+                int promoted = (int)val;
+#endif
+                if (write_formatted(fmtbuf, promoted) != 0) {
                     eprintf("printf: stdout: %s\n", strerror(errno));
                     return 1;
                 }
