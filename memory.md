@@ -81,3 +81,5 @@
 - Updated mainline `du` to report stdout write errors consistently (including per-entry `-a` output) instead of silently ignoring failed `printf` calls.
 - Fixed mainline `cd` to print `OLDPWD` only after a successful directory change and to report stdout write errors; added BSD reference comments to match FreeBSD `cd` behavior.
 - Hardened mainline `ls` stdout handling by routing formatted output through a bounded `oprintf`/`write_all` path and reporting write failures instead of silently succeeding on EIO/EPIPE.
+- Fixed mainline `mv` to reject destinations inside the source tree to avoid recursive self-copy. Cause: directory moves lacked a containment check, allowing `mv src src/subdir` to recurse indefinitely until path or resource limits were hit. Fix: resolve source/destination paths (including non-existent targets) and return `EINVAL` when the destination is a descendant.
+- Updated mainline `uname` to use robust stdout writes and report write errors instead of silently succeeding.

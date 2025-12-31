@@ -9,6 +9,14 @@
 
 #include "sdkconfig.h"
 
+/*
+ * BSD reference: FreeBSD uname(1).
+ *
+ * Behavior notes:
+ * - Default output is the system name only.
+ * - -a is equivalent to -s -n -r -v -m on FreeBSD.
+ */
+
 static void eprintf(const char *fmt, ...)
 {
     char buf[256];
@@ -24,6 +32,27 @@ static void eprintf(const char *fmt, ...)
         len = sizeof(buf) - 1;
     }
     (void)write(STDERR_FILENO, buf, len);
+}
+
+static int write_all(int fd, const void *buf, size_t len)
+{
+    const unsigned char *p = (const unsigned char *)buf;
+    size_t off = 0;
+    while (off < len) {
+        ssize_t w = write(fd, p + off, len - off);
+        if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (w == 0) {
+            errno = EIO;
+            return -1;
+        }
+        off += (size_t)w;
+    }
+    return 0;
 }
 
 typedef struct {
@@ -128,11 +157,20 @@ static int uname_print(const uname_opts_t *opts)
 
     for (int i = 0; i < n; ++i) {
         if (i != 0) {
-            putchar(' ');
+            if (write_all(STDOUT_FILENO, " ", 1) != 0) {
+                return -1;
+            }
         }
-        fputs(fields[i] ? fields[i] : "", stdout);
+        if (fields[i] != NULL) {
+            size_t len = strlen(fields[i]);
+            if (len > 0 && write_all(STDOUT_FILENO, fields[i], len) != 0) {
+                return -1;
+            }
+        }
     }
-    putchar('\n');
+    if (write_all(STDOUT_FILENO, "\n", 1) != 0) {
+        return -1;
+    }
     return 0;
 }
 
@@ -182,5 +220,9 @@ int main(int argc, char **argv)
         opts.sysname = true;
     }
 
-    return uname_print(&opts);
+    if (uname_print(&opts) != 0) {
+        eprintf("uname: stdout: %s\n", strerror(errno));
+        return 1;
+    }
+    return 0;
 }
