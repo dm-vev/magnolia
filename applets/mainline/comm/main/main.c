@@ -220,11 +220,19 @@ static int line_compare(const struct line_buffer *a, const struct line_buffer *b
 
 static int write_tabs(unsigned count)
 {
-    static const char tabs[] = "\t\t";
     if (count == 0) {
         return 0;
     }
-    return write_all(STDOUT_FILENO, tabs, count);
+    static const char tabs[] = "\t\t\t\t\t\t\t\t";
+    size_t remaining = count;
+    while (remaining > 0) {
+        size_t chunk = remaining > (sizeof(tabs) - 1) ? (sizeof(tabs) - 1) : remaining;
+        if (write_all(STDOUT_FILENO, tabs, chunk) != 0) {
+            return -1;
+        }
+        remaining -= chunk;
+    }
+    return 0;
 }
 
 static int output_line(unsigned tabs, const struct line_buffer *line)
