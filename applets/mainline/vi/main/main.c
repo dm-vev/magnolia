@@ -4518,12 +4518,37 @@ static char *multilines[20] = {
     "This is too much english for a computer geek.\n",
 };
 
+// Keep CRASHME buffers bounded to avoid OOB writes during fuzz-style input.
+static size_t crashbuf_append_char(char *buf, size_t cap, size_t len, char c)
+{
+    if (cap == 0 || len + 1 >= cap) {
+        return len;
+    }
+    buf[len++] = c;
+    buf[len] = '\0';
+    return len;
+}
+
+static size_t crashbuf_append_str(char *buf, size_t cap, size_t len, const char *src)
+{
+    if (cap == 0 || src == NULL || len + 1 >= cap) {
+        return len;
+    }
+    size_t avail = cap - len - 1;
+    size_t n = strnlen(src, avail);
+    memcpy(buf + len, src, n);
+    len += n;
+    buf[len] = '\0';
+    return len;
+}
+
 // create a random command to execute
 static void crash_dummy()
 {
     static int sleeptime; // how long to pause between commands
     char c, cm, *cmd, *cmd1;
-    int i, cnt, thing, rbi, startrbi, percent;
+    int i, cnt, thing, percent;
+    size_t rbi, startrbi;
 
     // "dot" movement commands
     cmd1 = " \n\r\002\004\005\006\025\0310^$-+wWeEbBhjklHL";
@@ -4534,7 +4559,7 @@ static void crash_dummy()
 cd0:
     startrbi = rbi = 0;
     sleeptime = 0; // how long to pause between commands
-    memset(readbuffer, '\0', sizeof(readbuffer));
+    readbuffer[0] = '\0';
     // generate a command by percentages
     percent = (int)lrand48() % 100; // get a number from 0-99
     if (percent < Mp) {             //  Movement commands
@@ -4566,7 +4591,7 @@ cd0:
     cm = cmd[i];
     if (strchr(":\024", cm))
         goto cd0;           // dont allow colon or ctrl-T commands
-    readbuffer[rbi++] = cm; // put cmd into input buffer
+    rbi = crashbuf_append_char(readbuffer, sizeof(readbuffer), rbi, cm);
 
     // now we have the command-
     // there are 1, 2, and multi char commands
@@ -4578,33 +4603,37 @@ cd0:
         }
         thing = (int)lrand48() % strlen(cmd1); // pick a movement command
         c = cmd1[thing];
-        readbuffer[rbi++] = c; // add movement to input buffer
+        rbi = crashbuf_append_char(readbuffer, sizeof(readbuffer), rbi, c);
     }
     if (strchr("iIaAsc", cm)) { // multi-char commands
         if (cm == 'c') {
             // change some thing
             thing = (int)lrand48() % strlen(cmd1); // pick a movement command
             c = cmd1[thing];
-            readbuffer[rbi++] = c; // add movement to input buffer
+            rbi = crashbuf_append_char(readbuffer, sizeof(readbuffer), rbi, c);
         }
         thing = (int)lrand48() % 4; // what thing to insert
         cnt = (int)lrand48() % 10;  // how many to insert
         for (i = 0; i < cnt; i++) {
             if (thing == 0) { // insert chars
-                readbuffer[rbi++] = chars[((int)lrand48() % strlen(chars))];
+                c = chars[((int)lrand48() % strlen(chars))];
+                rbi = crashbuf_append_char(readbuffer, sizeof(readbuffer), rbi, c);
             } else if (thing == 1) { // insert words
-                strcat(readbuffer, words[(int)lrand48() % 20]);
-                strcat(readbuffer, " ");
+                rbi = crashbuf_append_str(readbuffer, sizeof(readbuffer), rbi,
+                                          words[(int)lrand48() % 20]);
+                rbi = crashbuf_append_str(readbuffer, sizeof(readbuffer), rbi, " ");
                 sleeptime = 0;       // how fast to type
             } else if (thing == 2) { // insert lines
-                strcat(readbuffer, lines[(int)lrand48() % 20]);
+                rbi = crashbuf_append_str(readbuffer, sizeof(readbuffer), rbi,
+                                          lines[(int)lrand48() % 20]);
                 sleeptime = 0; // how fast to type
             } else {           // insert multi-lines
-                strcat(readbuffer, multilines[(int)lrand48() % 20]);
+                rbi = crashbuf_append_str(readbuffer, sizeof(readbuffer), rbi,
+                                          multilines[(int)lrand48() % 20]);
                 sleeptime = 0; // how fast to type
             }
         }
-        strcat(readbuffer, "\033");
+        rbi = crashbuf_append_str(readbuffer, sizeof(readbuffer), rbi, "\033");
     }
     chars_to_parse = strlen(readbuffer);
 cd1:
@@ -4623,22 +4652,22 @@ static void crash_test()
 
     msg[0] = '\0';
     if (end < text) {
-        strcat(msg, "end<text ");
+        (void)crashbuf_append_str(msg, sizeof(msg), strlen(msg), "end<text ");
     }
     if (end > textend) {
-        strcat(msg, "end>textend ");
+        (void)crashbuf_append_str(msg, sizeof(msg), strlen(msg), "end>textend ");
     }
     if (dot < text) {
-        strcat(msg, "dot<text ");
+        (void)crashbuf_append_str(msg, sizeof(msg), strlen(msg), "dot<text ");
     }
     if (dot > end) {
-        strcat(msg, "dot>end ");
+        (void)crashbuf_append_str(msg, sizeof(msg), strlen(msg), "dot>end ");
     }
     if (screenbegin < text) {
-        strcat(msg, "screenbegin<text ");
+        (void)crashbuf_append_str(msg, sizeof(msg), strlen(msg), "screenbegin<text ");
     }
     if (screenbegin > end - 1) {
-        strcat(msg, "screenbegin>end-1 ");
+        (void)crashbuf_append_str(msg, sizeof(msg), strlen(msg), "screenbegin>end-1 ");
     }
 
     if (msg[0]) {
