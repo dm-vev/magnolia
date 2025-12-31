@@ -72,6 +72,11 @@ static int build_line(int argc, char **argv, char **out_line, size_t *out_len)
         }
     }
 
+    /* Guard the NUL terminator allocation from size_t wraparound. */
+    if (len > SIZE_MAX - 1) {
+        errno = EOVERFLOW;
+        return -1;
+    }
     char *line = (char *)malloc(len + 1);
     if (!line) {
         errno = ENOMEM;
