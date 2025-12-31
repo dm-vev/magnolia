@@ -3,6 +3,8 @@
 #include "kernel/fcntl.h"
 #include "user/user.h"
 
+#include <limits.h>
+
 //
 // wrapper so that it's OK if main() does not call exit().
 //
@@ -102,8 +104,14 @@ atoi(const char *s)
   int n;
 
   n = 0;
-  while('0' <= *s && *s <= '9')
-    n = n*10 + *s++ - '0';
+  while('0' <= *s && *s <= '9'){
+    int digit = *s++ - '0';
+    /* Clamp to avoid signed overflow UB on large inputs. */
+    if (n > (INT_MAX - digit) / 10) {
+      return INT_MAX;
+    }
+    n = n*10 + digit;
+  }
   return n;
 }
 
