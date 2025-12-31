@@ -13,6 +13,8 @@
 
 static const char *g_version = "Magnolia coreutils 0.1";
 
+/* BSD reference: FreeBSD cp(1). */
+
 static void eprintf(const char *fmt, ...)
 {
     char buf[256];
@@ -196,8 +198,19 @@ static int copy_tree(const char *src, const char *dst, bool force)
     struct dirent *ent;
     int failed = 0;
     int saved_errno = 0;
-    errno = 0;
-    while ((ent = readdir(dir)) != NULL) {
+    /* readdir() uses errno to signal errors, so clear it before each call. */
+    for (;;) {
+        errno = 0;
+        ent = readdir(dir);
+        if (!ent) {
+            if (errno != 0) {
+                if (!saved_errno) {
+                    saved_errno = errno;
+                }
+                failed = 1;
+            }
+            break;
+        }
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
             continue;
         }
@@ -220,12 +233,6 @@ static int copy_tree(const char *src, const char *dst, bool force)
         }
         free(s);
         free(d);
-    }
-    if (ent == NULL && errno != 0) {
-        if (!saved_errno) {
-            saved_errno = errno;
-        }
-        failed = 1;
     }
     (void)closedir(dir);
     if (failed && saved_errno != 0) {
