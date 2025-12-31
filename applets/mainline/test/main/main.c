@@ -136,6 +136,13 @@ static int int_cmp(const char *a, const char *op, const char *b, bool *out)
     return -1;
 }
 
+static bool is_unary_op(const char *op)
+{
+    return streq(op, "-e") || streq(op, "-f") || streq(op, "-d") ||
+        streq(op, "-r") || streq(op, "-w") || streq(op, "-x") ||
+        streq(op, "-n") || streq(op, "-z");
+}
+
 static int eval(int argc, char **argv, bool *out)
 {
     if (argc <= 0) {
@@ -158,6 +165,10 @@ static int eval(int argc, char **argv, bool *out)
     }
 
     if (argc == 1) {
+        if (is_unary_op(argv[0])) {
+            /* BSD test(1): unary operators require an operand. */
+            return 2;
+        }
         *out = (argv[0] && argv[0][0] != '\0');
         return 0;
     }
