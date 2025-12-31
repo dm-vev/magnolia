@@ -5,6 +5,7 @@ extern crate alloc;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
+use magnolia_applet::errno::{Error, EINTR};
 use magnolia_applet::fs;
 use magnolia_applet::io;
 use magnolia_applet::sys;
@@ -74,40 +75,58 @@ fn parse_size(input: &str) -> Option<u64> {
     }
 }
 
-fn write_all(fd: i32, buf: &[u8]) -> Result<(), i32> {
-    let mut off = 0usize;
-    while off < buf.len() {
-        let n = unsafe { sys::write(fd, buf[off..].as_ptr().cast(), buf.len() - off) };
+fn write_all(fd: i32, mut buf: &[u8]) -> Result<(), Error> {
+    while !buf.is_empty() {
+        let n = unsafe { sys::write(fd, buf.as_ptr().cast(), buf.len()) };
         if n < 0 {
-            return Err(magnolia_applet::errno::errno());
+            let err = Error::last();
+            if err.errno == EINTR {
+                continue;
+            }
+            return Err(err);
         }
         if n == 0 {
-            return Err(5);
+            return Err(Error { errno: 5 });
         }
-        off += n as usize;
+        buf = &buf[n as usize..];
     }
     Ok(())
+}
+
+fn read_retry(fd: i32, buf: &mut [u8]) -> Result<usize, Error> {
+    loop {
+        match io::read(fd, buf) {
+            Ok(read) => return Ok(read),
+            Err(err) if err.errno == EINTR => continue,
+            Err(err) => return Err(err),
+        }
+    }
 }
 
 fn skip_input(fd: i32, blocks: u64, ibs: usize) -> bool {
     if blocks == 0 {
         return true;
     }
-    let offset = (blocks as i64).saturating_mul(ibs as i64) as sys::off_t;
-    let rc = unsafe { sys::lseek(fd, offset, sys::SEEK_CUR) };
-    if rc >= 0 {
-        return true;
+    // Avoid off_t overflow; fall back to read-and-discard when too large.
+    if let Some(bytes) = blocks.checked_mul(ibs as u64) {
+        if bytes <= sys::off_t::MAX as u64 {
+            let offset = bytes as sys::off_t;
+            let rc = unsafe { sys::lseek(fd, offset, sys::SEEK_CUR) };
+            if rc >= 0 {
+                return true;
+            }
+        }
     }
     let mut buf = vec![0u8; ibs];
     let mut left = blocks;
     while left > 0 {
-        let r = io::read(fd, &mut buf);
-        if let Ok(n) = r {
-            if n == 0 {
-                return false;
+        match read_retry(fd, &mut buf) {
+            Ok(n) => {
+                if n == 0 {
+                    return false;
+                }
             }
-        } else {
-            return false;
+            Err(_) => return false,
         }
         left -= 1;
     }
@@ -118,10 +137,15 @@ fn seek_output(fd: i32, blocks: u64, obs: usize) -> bool {
     if blocks == 0 {
         return true;
     }
-    let offset = (blocks as i64).saturating_mul(obs as i64) as sys::off_t;
-    let rc = unsafe { sys::lseek(fd, offset, sys::SEEK_CUR) };
-    if rc >= 0 {
-        return true;
+    // Avoid off_t overflow; fall back to zero writes when too large.
+    if let Some(bytes) = blocks.checked_mul(obs as u64) {
+        if bytes <= sys::off_t::MAX as u64 {
+            let offset = bytes as sys::off_t;
+            let rc = unsafe { sys::lseek(fd, offset, sys::SEEK_CUR) };
+            if rc >= 0 {
+                return true;
+            }
+        }
     }
     let zeros = vec![0u8; obs];
     let mut left = blocks;
@@ -300,7 +324,7 @@ fn dd_main(args: &[String]) -> i32 {
     let mut blocks = 0u64;
 
     while !use_count || blocks < count {
-        let r = io::read(in_fd, &mut ibuf);
+        let r = read_retry(in_fd, &mut ibuf);
         let n = match r {
             Ok(v) => v,
             Err(_) => {
