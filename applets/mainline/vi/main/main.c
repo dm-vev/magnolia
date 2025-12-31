@@ -551,7 +551,13 @@ char *xstrdup(const char *old)
         return NULL;
     }
 
-    size_t len = strlen(old) + 1;
+    size_t len = strlen(old);
+    if (len > SIZE_MAX - 1) {
+        errno = EOVERFLOW;
+        perror("malloc");
+        exit(69);
+    }
+    len += 1;
     char *ptr = malloc(len);
     if (ptr == NULL) {
         perror("malloc");

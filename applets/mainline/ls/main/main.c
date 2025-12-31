@@ -109,7 +109,12 @@ static int cmp_strptr(const void *a, const void *b)
 
 static char *xstrdup(const char *s)
 {
-    size_t len = strlen(s) + 1;
+    size_t len = strlen(s);
+    if (len > SIZE_MAX - 1) {
+        errno = EOVERFLOW;
+        return NULL;
+    }
+    len += 1;
     char *out = (char *)malloc(len);
     if (!out) {
         return NULL;

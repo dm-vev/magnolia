@@ -5,6 +5,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -57,7 +58,12 @@ static int write_all(int fd, const void *buf, size_t len)
 
 static char *xstrdup(const char *s)
 {
-    size_t len = strlen(s) + 1;
+    size_t len = strlen(s);
+    if (len > SIZE_MAX - 1) {
+        errno = EOVERFLOW;
+        return NULL;
+    }
+    len += 1;
     char *out = (char *)malloc(len);
     if (!out) {
         return NULL;
@@ -114,6 +120,12 @@ static int read_lines_from_fd(int fd, char ***out_lines, size_t *out_count, size
             break;
         }
         for (ssize_t i = 0; i < r; ++i) {
+            /* Guard against size_t wrap on extremely long lines. */
+            if (len > SIZE_MAX - 2) {
+                free(line);
+                errno = EOVERFLOW;
+                return -1;
+            }
             if (len + 2 > cap) {
                 if (grow_buffer((void **)&line, &cap, len + 2, 1) != 0) {
                     free(line);
