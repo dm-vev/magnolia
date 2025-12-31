@@ -37,3 +37,4 @@
 - Hardened `applets/mainline/hexdump` stdout writes to handle EINTR/short writes and report stdout errors.
 - Fixed mainline `du` to avoid symlink-following recursion (stack overflow) by using `lstat`, added path length overflow checks, and reported `readdir` errors.
 - Fixed `applets/mainline/df` `join_path` size_t overflow that could under-allocate and OOB-write on very long path components. Cause: unchecked size_t addition when combining `dir`/`name`. Fix: explicit overflow checks and `ENAMETOOLONG` on overflow.
+- Fixed mainline `sort` buffer growth overflow that could wrap sizes and lead to heap overwrite on extremely long input lines or large line counts. Cause: unchecked size_t doubling during realloc for line buffers and pointer arrays. Fix: centralized growth helper with overflow guards and consistent `ENOMEM` handling, plus EINTR-safe I/O and zero-write detection to avoid hangs.

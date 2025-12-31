@@ -8,6 +8,8 @@
 #include <string.h>
 #include <unistd.h>
 
+/* BSD reference: FreeBSD sort(1). */
+
 static const char *g_version = "Magnolia coreutils 0.1";
 
 static void eprintf(const char *fmt, ...)
@@ -39,6 +41,13 @@ static int write_all(int fd, const void *buf, size_t len)
     while (off < len) {
         ssize_t w = write(fd, p + off, len - off);
         if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (w == 0) {
+            errno = EIO;
             return -1;
         }
         off += (size_t)w;
@@ -57,6 +66,34 @@ static char *xstrdup(const char *s)
     return out;
 }
 
+static int grow_buffer(void **buf, size_t *cap, size_t needed, size_t item_size)
+{
+    /* Guard against size_t overflow when growing buffers. */
+    if (*cap >= needed) {
+        return 0;
+    }
+    size_t next = *cap ? *cap : 128;
+    while (next < needed) {
+        if (next > SIZE_MAX / 2) {
+            errno = ENOMEM;
+            return -1;
+        }
+        next *= 2;
+    }
+    if (item_size > 0 && next > SIZE_MAX / item_size) {
+        errno = ENOMEM;
+        return -1;
+    }
+    void *tmp = realloc(*buf, next * item_size);
+    if (!tmp) {
+        errno = ENOMEM;
+        return -1;
+    }
+    *buf = tmp;
+    *cap = next;
+    return 0;
+}
+
 static int read_lines_from_fd(int fd, char ***out_lines, size_t *out_count, size_t *out_cap)
 {
     char buf[256];
@@ -67,6 +104,9 @@ static int read_lines_from_fd(int fd, char ***out_lines, size_t *out_count, size
     while (1) {
         ssize_t r = read(fd, buf, sizeof(buf));
         if (r < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
             free(line);
             return -1;
         }
@@ -75,18 +115,10 @@ static int read_lines_from_fd(int fd, char ***out_lines, size_t *out_count, size
         }
         for (ssize_t i = 0; i < r; ++i) {
             if (len + 2 > cap) {
-                size_t next = cap ? cap * 2 : 128;
-                while (next < len + 2) {
-                    next *= 2;
-                }
-                char *tmp = (char *)realloc(line, next);
-                if (!tmp) {
+                if (grow_buffer((void **)&line, &cap, len + 2, 1) != 0) {
                     free(line);
-                    errno = ENOMEM;
                     return -1;
                 }
-                line = tmp;
-                cap = next;
             }
             line[len++] = buf[i];
             if (buf[i] == '\n') {
@@ -98,16 +130,11 @@ static int read_lines_from_fd(int fd, char ***out_lines, size_t *out_count, size
                     return -1;
                 }
                 if (*out_count == *out_cap) {
-                    size_t next = *out_cap ? *out_cap * 2 : 128;
-                    char **tmp = (char **)realloc(*out_lines, next * sizeof(char *));
-                    if (!tmp) {
+                    if (grow_buffer((void **)out_lines, out_cap, *out_count + 1, sizeof(char *)) != 0) {
                         free(copy);
                         free(line);
-                        errno = ENOMEM;
                         return -1;
                     }
-                    *out_lines = tmp;
-                    *out_cap = next;
                 }
                 (*out_lines)[(*out_count)++] = copy;
                 len = 0;
@@ -124,16 +151,11 @@ static int read_lines_from_fd(int fd, char ***out_lines, size_t *out_count, size
             return -1;
         }
         if (*out_count == *out_cap) {
-            size_t next = *out_cap ? *out_cap * 2 : 128;
-            char **tmp = (char **)realloc(*out_lines, next * sizeof(char *));
-            if (!tmp) {
+            if (grow_buffer((void **)out_lines, out_cap, *out_count + 1, sizeof(char *)) != 0) {
                 free(copy);
                 free(line);
-                errno = ENOMEM;
                 return -1;
             }
-            *out_lines = tmp;
-            *out_cap = next;
         }
         (*out_lines)[(*out_count)++] = copy;
     }
