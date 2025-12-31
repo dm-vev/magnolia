@@ -703,13 +703,32 @@ static int handle_conversion(struct format_spec *spec, struct arg_state *state, 
 
     switch (spec->spec) {
     case '%':
-        if (build_format(spec, fmtbuf, sizeof(fmtbuf)) != 0) {
-            eprintf("printf: invalid format\n");
+        if (spec->length != LEN_NONE) {
+            eprintf("printf: invalid length modifier for %% conversion\n");
             return 1;
         }
-        if (write_formatted(fmtbuf) != 0) {
-            eprintf("printf: stdout: %s\n", strerror(errno));
-            return 1;
+        {
+            size_t pad = 0;
+            if (spec->width_specified && spec->width > 1) {
+                pad = (size_t)(spec->width - 1);
+            }
+            char pad_ch = (spec->zero && !spec->left) ? '0' : ' ';
+            if (!spec->left) {
+                if (write_pad(pad, pad_ch) != 0) {
+                    eprintf("printf: stdout: %s\n", strerror(errno));
+                    return 1;
+                }
+            }
+            if (write_all(STDOUT_FILENO, "%", 1) != 0) {
+                eprintf("printf: stdout: %s\n", strerror(errno));
+                return 1;
+            }
+            if (spec->left) {
+                if (write_pad(pad, ' ') != 0) {
+                    eprintf("printf: stdout: %s\n", strerror(errno));
+                    return 1;
+                }
+            }
         }
         return 0;
     case 'b': {
