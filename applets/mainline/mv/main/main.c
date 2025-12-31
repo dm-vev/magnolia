@@ -42,6 +42,15 @@ static bool streq(const char *a, const char *b)
     return a && b && strcmp(a, b) == 0;
 }
 
+static int lstat_compat(const char *path, struct stat *st)
+{
+#ifdef ESP_PLATFORM
+    return stat(path, st);
+#else
+    return lstat(path, st);
+#endif
+}
+
 static int write_all(int fd, const void *buf, size_t len)
 {
     const unsigned char *p = (const unsigned char *)buf;
@@ -161,7 +170,7 @@ static int ensure_dir(const char *path)
 static int rm_tree(const char *path)
 {
     struct stat st;
-    if (lstat(path, &st) != 0) {
+    if (lstat_compat(path, &st) != 0) {
         return -1;
     }
     if (S_ISDIR(st.st_mode)) {
@@ -199,7 +208,7 @@ static int rm_tree(const char *path)
 static int read_symlink_target(const char *src, char **out_target)
 {
     struct stat st;
-    if (lstat(src, &st) != 0) {
+    if (lstat_compat(src, &st) != 0) {
         return -1;
     }
     if (st.st_size < 0) {
@@ -269,7 +278,20 @@ static int mv_tree(const char *src, const char *dst, bool force);
 static int mv_entry(const char *src, const char *dst, bool force)
 {
     struct stat st;
-    if (lstat(src, &st) != 0) {
+    if (lstat_compat(src, &st) != 0) {
+        return -1;
+    }
+    if (!dst) {
+        errno = EINVAL;
+        return -1;
+    }
+    struct stat dst_st;
+    if (lstat_compat(dst, &dst_st) == 0) {
+        if (st.st_dev == dst_st.st_dev && st.st_ino == dst_st.st_ino) {
+            /* Same file: mimic rename(2) no-op to avoid data loss. */
+            return 0;
+        }
+    } else if (errno != ENOENT) {
         return -1;
     }
     if (S_ISLNK(st.st_mode)) {
@@ -399,6 +421,11 @@ int main(int argc, char **argv)
         const char *final_dst = dst;
         if (dst_is_dir) {
             out = join_path(dst, path_basename(src));
+            if (!out) {
+                eprintf("mv: %s -> %s: %s\n", src, dst ? dst : "", strerror(errno));
+                failed = 1;
+                continue;
+            }
             final_dst = out;
         }
         if (mv_entry(src, final_dst, force) != 0) {
