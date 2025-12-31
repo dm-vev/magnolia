@@ -63,6 +63,11 @@ static int write_all(int fd, const unsigned char *buf, size_t len)
             }
             return -1;
         }
+        if (w == 0) {
+            /* Treat zero-length writes as an I/O failure to avoid livelock. */
+            errno = EIO;
+            return -1;
+        }
         off += (size_t)w;
     }
     return 0;
@@ -646,12 +651,14 @@ int main(int argc, char **argv)
     }
 
     int prev_out = -1;
+    int exit_status = 0;
     unsigned char inbuf[4096];
     unsigned char outbuf[4096];
     while (1) {
         ssize_t r = read_retry(STDIN_FILENO, inbuf, sizeof(inbuf));
         if (r < 0) {
             eprintf("tr: read: %s\n", strerror(errno));
+            exit_status = 1;
             break;
         }
         if (r == 0) {
@@ -672,6 +679,7 @@ int main(int argc, char **argv)
         }
         if (write_all(STDOUT_FILENO, outbuf, out_len) != 0) {
             eprintf("tr: write: %s\n", strerror(errno));
+            exit_status = 1;
             break;
         }
     }
@@ -681,5 +689,5 @@ int main(int argc, char **argv)
     }
     list_free(&set1_raw);
     list_free(&set2);
-    return 0;
+    return exit_status;
 }
