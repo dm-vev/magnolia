@@ -1,6 +1,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <getopt.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -46,7 +47,19 @@ static char *join_path(const char *dir, const char *name)
     size_t dlen = strlen(dir);
     size_t nlen = strlen(name);
     bool need_slash = (dlen > 0 && dir[dlen - 1] != '/');
-    size_t extra = (need_slash ? 1 : 0) + nlen + 1;
+    /* Avoid size_t wrap when building long child paths. */
+    size_t extra = nlen + 1;
+    if (extra < nlen) {
+        errno = ENAMETOOLONG;
+        return NULL;
+    }
+    if (need_slash) {
+        if (extra == SIZE_MAX) {
+            errno = ENAMETOOLONG;
+            return NULL;
+        }
+        extra += 1;
+    }
     if (dlen > SIZE_MAX - extra) {
         errno = ENAMETOOLONG;
         return NULL;
@@ -72,7 +85,18 @@ static unsigned long long blocks_1k(off_t size)
     if (size <= 0) {
         return 0;
     }
-    return (unsigned long long)((size + 1023) / 1024);
+    /* Use div/mod to avoid signed overflow in size rounding. */
+    uintmax_t bytes = (uintmax_t)size;
+    uintmax_t blocks = bytes / 1024;
+    if ((bytes % 1024) != 0) {
+        if (blocks < UINTMAX_MAX) {
+            blocks++;
+        }
+    }
+    if (blocks > ULLONG_MAX) {
+        return ULLONG_MAX;
+    }
+    return (unsigned long long)blocks;
 }
 
 static int du_walk(const char *path, bool all, bool summary, unsigned long long *out_blocks)
@@ -105,7 +129,11 @@ static int du_walk(const char *path, bool all, bool summary, unsigned long long 
                 (void)closedir(dir);
                 return -1;
             }
-            total += child_blocks;
+            if (ULLONG_MAX - total < child_blocks) {
+                total = ULLONG_MAX;
+            } else {
+                total += child_blocks;
+            }
             if (all && !summary) {
                 printf("%llu\t%s\n", child_blocks, child);
             }
