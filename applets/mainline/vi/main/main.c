@@ -2518,9 +2518,17 @@ static void start_new_cmd_q(char c)
 {
     // get buffer for new cmd
     // if there is a current cmd count put it in the buffer first
-    if (cmdcnt > 0)
-        lmc_len = sprintf(last_modifying_cmd, "%d%c", cmdcnt, c);
-    else { // just save char c onto queue
+    if (cmdcnt > 0) {
+        int n = snprintf(last_modifying_cmd, sizeof(last_modifying_cmd), "%d%c", cmdcnt, c);
+        if (n < 0 || (size_t)n >= sizeof(last_modifying_cmd)) {
+            // Fallback on truncation to avoid overrunning the fixed command buffer.
+            last_modifying_cmd[0] = c;
+            last_modifying_cmd[1] = '\0';
+            lmc_len = 1;
+        } else {
+            lmc_len = n;
+        }
+    } else { // just save char c onto queue
         last_modifying_cmd[0] = c;
         lmc_len = 1;
     }
@@ -3072,7 +3080,10 @@ static void place_cursor(int row, int col, int optimize)
         col = columns - 1;
 
     //----- 1.  Try the standard terminal ESC sequence
-    sprintf(cm1, CMrc, row + 1, col + 1);
+    int cm1_len = snprintf(cm1, sizeof(cm1), CMrc, row + 1, col + 1);
+    if (cm1_len < 0 || (size_t)cm1_len >= sizeof(cm1)) {
+        return;
+    }
     cm = cm1;
 
 #if ENABLE_FEATURE_VI_OPTIMIZE_CURSOR
@@ -3086,6 +3097,8 @@ static void place_cursor(int row, int col, int optimize)
         char *screenp;
         int Rrow = last_row;
         int diff = Rrow - row;
+        size_t cm2_len = 0;
+        size_t cm2_cap = sizeof(cm2);
 
         if (diff < -5 || diff > 5)
             goto skip;
@@ -3097,20 +3110,37 @@ static void place_cursor(int row, int col, int optimize)
         // move to the correct row
         while (row < Rrow) {
             // the cursor has to move up
-            strcat(cm2, CMup);
+            size_t up_len = strlen(CMup);
+            if (cm2_len + up_len + 1 > cm2_cap)
+                goto skip;
+            memcpy(cm2 + cm2_len, CMup, up_len);
+            cm2_len += up_len;
+            cm2[cm2_len] = '\0';
             Rrow--;
         }
         while (row > Rrow) {
             // the cursor has to move down
-            strcat(cm2, CMdown);
+            size_t dn_len = strlen(CMdown);
+            if (cm2_len + dn_len + 1 > cm2_cap)
+                goto skip;
+            memcpy(cm2 + cm2_len, CMdown, dn_len);
+            cm2_len += dn_len;
+            cm2[cm2_len] = '\0';
             Rrow++;
         }
 
         // now move to the correct column
-        strcat(cm2, "\r"); // start at col 0
+        if (cm2_len + 1 + 1 > cm2_cap)
+            goto skip;
+        cm2[cm2_len++] = '\r'; // start at col 0
+        cm2[cm2_len] = '\0';
         // just send out orignal source char to get to correct place
         screenp = &screen[row * columns]; // start of screen line
-        strncat(cm2, screenp, col);
+        if (cm2_len + (size_t)col + 1 > cm2_cap)
+            goto skip;
+        memcpy(cm2 + cm2_len, screenp, (size_t)col);
+        cm2_len += (size_t)col;
+        cm2[cm2_len] = '\0';
 
         // pick the shortest cursor motion to send out
         if (strlen(cm2) < strlen(cm)) {
@@ -3229,12 +3259,39 @@ static void show_status_line(void)
 static void status_line_bold(const char *format, ...)
 {
     va_list args;
+    size_t cap = STATUS_BUFFER_LEN;
+    size_t off = 0;
+
+    if (cap == 0) {
+        return;
+    }
+
+    /* Clamp status output to avoid overflowing the fixed status buffer. */
+    size_t prefix_len = strlen(SOs);
+    if (prefix_len >= cap) {
+        prefix_len = cap - 1;
+    }
+    memcpy(status_buffer, SOs, prefix_len);
+    off = prefix_len;
+    status_buffer[off] = '\0';
 
     va_start(args, format);
-    strcpy(status_buffer, SOs); // Terminal standout mode on
-    vsprintf(status_buffer + sizeof(SOs) - 1, format, args);
-    strcat(status_buffer, SOn); // Terminal standout mode off
+    if (off < cap) {
+        (void)vsnprintf(status_buffer + off, cap - off, format, args);
+    }
     va_end(args);
+
+    size_t len = strnlen(status_buffer, cap);
+    size_t suffix_len = strlen(SOn);
+    if (suffix_len > 0 && len < cap - 1) {
+        size_t avail = cap - len - 1;
+        if (suffix_len > avail) {
+            suffix_len = avail;
+        }
+        memcpy(status_buffer + len, SOn, suffix_len);
+        len += suffix_len;
+        status_buffer[len] = '\0';
+    }
 }
 
 // format status buffer
@@ -3243,7 +3300,7 @@ static void status_line(const char *format, ...)
     va_list args;
 
     va_start(args, format);
-    vsprintf(status_buffer, format, args);
+    (void)vsnprintf(status_buffer, STATUS_BUFFER_LEN, format, args);
     va_end(args);
 }
 
@@ -4556,8 +4613,9 @@ static void crash_test()
     }
     tim = time(NULL);
     if (tim >= (oldtim + 3)) {
-        sprintf(status_buffer, "Tot=%d: M=%d N=%d I=%d D=%d Y=%d P=%d U=%d size=%d", totalcmds, M,
-                N, I, D, Y, P, U, end - text + 1);
+        (void)snprintf(status_buffer, STATUS_BUFFER_LEN,
+                       "Tot=%d: M=%d N=%d I=%d D=%d Y=%d P=%d U=%d size=%d",
+                       totalcmds, M, N, I, D, Y, P, U, end - text + 1);
         oldtim = tim;
     }
 }
