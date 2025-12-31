@@ -8,6 +8,8 @@
 #include <string.h>
 #include <unistd.h>
 
+/* BSD reference: FreeBSD hexdump(1). */
+
 #define LINE_BYTES 16
 
 enum format_mode {
@@ -19,21 +21,49 @@ enum format_mode {
     F_SHORT_HEX,
 };
 
-static void oprintf(const char *fmt, ...)
+/* Robust write for stdout/stderr: handle EINTR and short writes. */
+static int write_all(int fd, const void *buf, size_t len)
+{
+    const unsigned char *p = (const unsigned char *)buf;
+    size_t off = 0;
+    while (off < len) {
+        ssize_t w = write(fd, p + off, len - off);
+        if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (w == 0) {
+            errno = EIO;
+            return -1;
+        }
+        off += (size_t)w;
+    }
+    return 0;
+}
+
+static int vwritef(int fd, const char *fmt, va_list ap)
 {
     char buf[512];
-    va_list ap;
-    va_start(ap, fmt);
     int n = vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
     if (n <= 0) {
-        return;
+        return 0;
     }
     size_t len = (size_t)n;
     if (len >= sizeof(buf)) {
         len = sizeof(buf) - 1;
     }
-    (void)write(STDOUT_FILENO, buf, len);
+    return write_all(fd, buf, len);
+}
+
+static int oprintf(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    int rc = vwritef(STDOUT_FILENO, fmt, ap);
+    va_end(ap);
+    return rc;
 }
 
 static void eprintf(const char *fmt, ...)
@@ -50,7 +80,7 @@ static void eprintf(const char *fmt, ...)
     if (len >= sizeof(buf)) {
         len = sizeof(buf) - 1;
     }
-    (void)write(STDERR_FILENO, buf, len);
+    (void)write_all(STDERR_FILENO, buf, len);
 }
 
 static int parse_token(const char *s, char **end_out, uint64_t *value)
@@ -174,7 +204,7 @@ static void render_char(unsigned char b, char out[4])
     out[2] = ' ';
 }
 
-static void print_canonical(uint64_t offset, const unsigned char *buf, size_t len)
+static int print_canonical(uint64_t offset, const unsigned char *buf, size_t len)
 {
     char line[256];
     size_t pos = 0;
@@ -200,10 +230,10 @@ static void print_canonical(uint64_t offset, const unsigned char *buf, size_t le
     }
     line[pos++] = '|';
     line[pos++] = '\n';
-    (void)write(STDOUT_FILENO, line, pos);
+    return write_all(STDOUT_FILENO, line, pos);
 }
 
-static void print_byte_octal(uint64_t offset, const unsigned char *buf, size_t len)
+static int print_byte_octal(uint64_t offset, const unsigned char *buf, size_t len)
 {
     char line[256];
     size_t pos = 0;
@@ -216,10 +246,10 @@ static void print_byte_octal(uint64_t offset, const unsigned char *buf, size_t l
         }
     }
     line[pos++] = '\n';
-    (void)write(STDOUT_FILENO, line, pos);
+    return write_all(STDOUT_FILENO, line, pos);
 }
 
-static void print_char(uint64_t offset, const unsigned char *buf, size_t len)
+static int print_char(uint64_t offset, const unsigned char *buf, size_t len)
 {
     char line[256];
     size_t pos = 0;
@@ -234,10 +264,10 @@ static void print_char(uint64_t offset, const unsigned char *buf, size_t len)
         }
     }
     line[pos++] = '\n';
-    (void)write(STDOUT_FILENO, line, pos);
+    return write_all(STDOUT_FILENO, line, pos);
 }
 
-static void print_short(uint64_t offset, const unsigned char *buf, size_t len, enum format_mode mode)
+static int print_short(uint64_t offset, const unsigned char *buf, size_t len, enum format_mode mode)
 {
     char line[256];
     size_t pos = 0;
@@ -263,30 +293,59 @@ static void print_short(uint64_t offset, const unsigned char *buf, size_t len, e
         }
     }
     line[pos++] = '\n';
-    (void)write(STDOUT_FILENO, line, pos);
+    return write_all(STDOUT_FILENO, line, pos);
 }
 
-static int skip_bytes(int fd, uint64_t *skip_left)
+static int skip_bytes(int fd, uint64_t *skip_left, uint64_t *offset)
 {
     if (*skip_left == 0) {
         return 0;
     }
-    off_t offset = (off_t)(*skip_left);
-    if (lseek(fd, offset, SEEK_CUR) >= 0) {
-        *skip_left = 0;
-        return 0;
+
+    uint64_t skipped = 0;
+    off_t seek_off = (off_t)(*skip_left);
+    if (seek_off >= 0 && (uint64_t)seek_off == *skip_left) {
+        off_t rc;
+        do {
+            rc = lseek(fd, seek_off, SEEK_CUR);
+        } while (rc < 0 && errno == EINTR);
+        if (rc >= 0) {
+            skipped = *skip_left;
+            *skip_left = 0;
+            if (offset) {
+                *offset += skipped;
+            }
+            return 0;
+        }
+        if (errno != ESPIPE && errno != EINVAL) {
+            return -1;
+        }
     }
     unsigned char buf[256];
     while (*skip_left > 0) {
         size_t chunk = sizeof(buf);
-        if (*skip_left < chunk) {
+        if (*skip_left < (uint64_t)chunk) {
             chunk = (size_t)*skip_left;
         }
-        ssize_t r = read(fd, buf, chunk);
-        if (r <= 0) {
+        ssize_t r;
+        do {
+            r = read(fd, buf, chunk);
+        } while (r < 0 && errno == EINTR);
+        if (r < 0) {
             return -1;
         }
+        if (r == 0) {
+            *skip_left = 0;
+            if (offset) {
+                *offset += skipped;
+            }
+            return 0;
+        }
         *skip_left -= (uint64_t)r;
+        skipped += (uint64_t)r;
+    }
+    if (offset) {
+        *offset += skipped;
     }
     return 0;
 }
@@ -300,7 +359,7 @@ static int hexdump_fd(int fd, const char *name, enum format_mode mode, bool verb
 
     while (1) {
         if (*skip > 0) {
-            if (skip_bytes(fd, skip) != 0) {
+            if (skip_bytes(fd, skip, offset) != 0) {
                 return -1;
             }
         }
@@ -309,7 +368,10 @@ static int hexdump_fd(int fd, const char *name, enum format_mode mode, bool verb
             want = (size_t)*remaining;
         }
         unsigned char buf[LINE_BYTES];
-        ssize_t r = read(fd, buf, want);
+        ssize_t r;
+        do {
+            r = read(fd, buf, want);
+        } while (r < 0 && errno == EINTR);
         if (r < 0) {
             eprintf("hexdump: %s: %s\n", name, strerror(errno));
             return -1;
@@ -324,19 +386,27 @@ static int hexdump_fd(int fd, const char *name, enum format_mode mode, bool verb
         bool same = !verbose && prev_len == len && memcmp(prev, buf, len) == 0;
         if (same) {
             if (!suppressed) {
-                oprintf("*\n");
+                if (oprintf("*\n") != 0) {
+                    eprintf("hexdump: stdout: %s\n", strerror(errno));
+                    return -1;
+                }
                 suppressed = true;
             }
         } else {
             suppressed = false;
+            int rc;
             if (mode == F_CANONICAL) {
-                print_canonical(*offset, buf, len);
+                rc = print_canonical(*offset, buf, len);
             } else if (mode == F_BYTE_OCTAL) {
-                print_byte_octal(*offset, buf, len);
+                rc = print_byte_octal(*offset, buf, len);
             } else if (mode == F_CHAR) {
-                print_char(*offset, buf, len);
+                rc = print_char(*offset, buf, len);
             } else {
-                print_short(*offset, buf, len, mode);
+                rc = print_short(*offset, buf, len, mode);
+            }
+            if (rc != 0) {
+                eprintf("hexdump: stdout: %s\n", strerror(errno));
+                return -1;
             }
             memcpy(prev, buf, len);
             prev_len = len;
@@ -430,6 +500,9 @@ int main(int argc, char **argv)
         }
     }
 
-    oprintf("%08llx\n", (unsigned long long)offset);
+    if (oprintf("%08llx\n", (unsigned long long)offset) != 0) {
+        eprintf("hexdump: stdout: %s\n", strerror(errno));
+        rc = 1;
+    }
     return rc;
 }

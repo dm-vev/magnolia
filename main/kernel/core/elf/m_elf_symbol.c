@@ -43,6 +43,7 @@ extern char **environ;
 
 /* libgcc helpers often referenced by TinyGo/Zig/Rust applets. */
 extern int __unorddf2(double x, double y);
+extern int __gtdf2(double x, double y);
 
 struct dyn_m_elfsym {
     const char *name;
@@ -318,8 +319,9 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     M_ELFSYM_EXPORT(cos),
     M_ELFSYM_EXPORT(tan),
 #endif
-    /* libgcc floating-point compare helper (ROM-backed on ESP chips) */
+    /* libgcc floating-point compare helpers (ROM-backed on ESP chips) */
     M_ELFSYM_EXPORT(__unorddf2),
+    M_ELFSYM_EXPORT(__gtdf2),
 
     /* stdlib helpers commonly used by small tools */
     M_ELFSYM_EXPORT(qsort),

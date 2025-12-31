@@ -4,9 +4,12 @@
 #include <string.h>
 
 #include "sdkconfig.h"
+#if CONFIG_MAGNOLIA_NET_ENABLE
 #include "kernel/core/net/m_net.h"
 #include "kernel/core/net/m_net_lwip.h"
+#endif
 
+#if CONFIG_MAGNOLIA_NET_ENABLE
 #ifndef CONFIG_MAGNOLIA_NET_MAX_DEVS
 #define CONFIG_MAGNOLIA_NET_MAX_DEVS 2
 #endif
@@ -286,3 +289,117 @@ int m_net_socket_summary(magnolia_net_socket_summary_t *out,
     return -ENOTSUP;
 #endif
 }
+#else
+int m_net_list_ifaces(magnolia_net_iface_name_t *out,
+                      size_t capacity,
+                      size_t *out_count)
+{
+    if (out == NULL && out_count == NULL) {
+        return -EINVAL;
+    }
+    if (out != NULL && capacity > 0) {
+        memset(out, 0, sizeof(*out));
+    }
+    if (out_count != NULL) {
+        *out_count = 0;
+    }
+    return -ENOTSUP;
+}
+
+int m_net_iface_get_info(const char *name, magnolia_net_iface_info_t *out)
+{
+    (void)name;
+    if (out == NULL) {
+        return -EINVAL;
+    }
+    memset(out, 0, sizeof(*out));
+    out->size = (uint32_t)sizeof(*out);
+    out->version = 1;
+    return -ENOTSUP;
+}
+
+int m_net_iface_up(const char *name)
+{
+    (void)name;
+    return -ENOTSUP;
+}
+
+int m_net_iface_down(const char *name)
+{
+    (void)name;
+    return -ENOTSUP;
+}
+
+int m_net_iface_set_ipv4(const char *name, const magnolia_net_ipv4_t *addr)
+{
+    (void)name;
+    if (addr == NULL) {
+        return -EINVAL;
+    }
+    return -ENOTSUP;
+}
+
+int m_net_iface_dhcp_start(const char *name)
+{
+    (void)name;
+    return -ENOTSUP;
+}
+
+int m_net_iface_dhcp_stop(const char *name)
+{
+    (void)name;
+    return -ENOTSUP;
+}
+
+int m_net_get_stats(const char *name, magnolia_netdev_stats_t *out)
+{
+    (void)name;
+    if (out == NULL) {
+        return -EINVAL;
+    }
+    memset(out, 0, sizeof(*out));
+    return -ENOTSUP;
+}
+
+int m_net_get_default_iface(char *out_name, size_t name_size)
+{
+    if (out_name == NULL || name_size == 0) {
+        return -EINVAL;
+    }
+    out_name[0] = '\0';
+    return -ENOTSUP;
+}
+
+int m_net_set_default_iface(const char *name)
+{
+    if (name == NULL || name[0] == '\0') {
+        return -EINVAL;
+    }
+    return -ENOTSUP;
+}
+
+int m_net_stats_snapshot_api(magnolia_net_stats_t *out)
+{
+    if (out == NULL) {
+        return -EINVAL;
+    }
+    memset(out, 0, sizeof(*out));
+    return -ENOTSUP;
+}
+
+int m_net_socket_summary(magnolia_net_socket_summary_t *out,
+                         size_t capacity,
+                         size_t *out_count)
+{
+    if (out == NULL && out_count == NULL) {
+        return -EINVAL;
+    }
+    if (out != NULL && capacity > 0) {
+        memset(out, 0, sizeof(*out));
+    }
+    if (out_count != NULL) {
+        *out_count = 0;
+    }
+    return -ENOTSUP;
+}
+#endif

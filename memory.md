@@ -18,6 +18,7 @@
 - Updated `applets/mainline/rm` to use `lstat` so symlinks are removed directly (no recursive traversal), and to avoid prompting for non-existent paths.
 - Added mainline BSD applets `printenv` and `rev`.
 - Added mainline BSD applet `printf`.
+- Hardened `applets/mainline/printf` width/precision parsing to avoid signed overflow UB on large format widths.
 - Updated mainline and Zig `cut` to enforce BSD option rules (-b/-c/-f exclusivity, -d/-s/-n validation), improve range parsing and error reporting, and fix field output for unterminated lines with robust I/O handling.
 - Updated `applets/mainline/touch` to implement BSD touch option parsing (-A/-a/-c/-f/-h/-m/-r/-t), time parsing, and robust timestamp updates with correct creation semantics.
 - Updated `applets/mainline/env` to implement BSD env option parsing (-i/-u/-P/-S/-v), argument splitting for -S, environment clearing, and exec path search with robust error handling.
@@ -30,3 +31,9 @@
 - Updated Zig `head` to mirror BSD/mainline option parsing, header handling, and error reporting with robust I/O.
 - Updated clear across mainline/Rust/Zig/Go to use BSD-style options (-T/-V/-x), terminal capability checks, and consistent error handling.
 - Reworked mainline `tr` to remove GNU-only flags, add BSD/POSIX-style option parsing, and implement full set expansion (classes, ranges, escapes, repeat), translation/deletion/squeeze logic with robust I/O.
+- Fixed mainline `df` directory traversal to avoid following symlink cycles (preventing unbounded recursion/stack overflow) by switching to `lstat` and treating symlinks as leaf nodes.
+- Hardened `applets/mainline/cp` I/O loops against EINTR/short writes and propagated close errors consistently.
+- Fixed `applets/mainline/cp` path concatenation to avoid size_t overflow/heap overwrite on long paths and to report `readdir` failures reliably.
+- Hardened `applets/mainline/hexdump` stdout writes to handle EINTR/short writes and report stdout errors.
+- Fixed mainline `du` to avoid symlink-following recursion (stack overflow) by using `lstat`, added path length overflow checks, and reported `readdir` errors.
+- Fixed `applets/mainline/df` `join_path` size_t overflow that could under-allocate and OOB-write on very long path components. Cause: unchecked size_t addition when combining `dir`/`name`. Fix: explicit overflow checks and `ENAMETOOLONG` on overflow.

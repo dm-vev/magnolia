@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -41,6 +42,13 @@ static int write_all(int fd, const void *buf, size_t len)
     while (off < len) {
         ssize_t w = write(fd, p + off, len - off);
         if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (w == 0) {
+            errno = EIO;
             return -1;
         }
         off += (size_t)w;
@@ -62,7 +70,18 @@ static char *join_path(const char *dir, const char *name)
     size_t dlen = strlen(dir);
     size_t nlen = strlen(name);
     bool need_slash = (dlen > 0 && dir[dlen - 1] != '/');
-    size_t total = dlen + (need_slash ? 1 : 0) + nlen + 1;
+    /* Guard against size_t wrap before allocation and copy. */
+    size_t extra = need_slash ? 1 : 0;
+    if (nlen > SIZE_MAX - extra - 1) {
+        errno = ENAMETOOLONG;
+        return NULL;
+    }
+    extra += nlen + 1;
+    if (dlen > SIZE_MAX - extra) {
+        errno = ENAMETOOLONG;
+        return NULL;
+    }
+    size_t total = dlen + extra;
     char *out = (char *)malloc(total);
     if (!out) {
         errno = ENOMEM;
@@ -94,25 +113,40 @@ static int copy_file(const char *src, const char *dst, bool force)
     }
 
     char buf[1024];
+    /* Preserve the first I/O error across retries and close handling. */
+    int result = 0;
+    int saved_errno = 0;
     while (1) {
         ssize_t r = read(in, buf, sizeof(buf));
         if (r < 0) {
-            (void)close(in);
-            (void)close(out);
-            return -1;
+            if (errno == EINTR) {
+                continue;
+            }
+            saved_errno = errno;
+            result = -1;
+            break;
         }
         if (r == 0) {
             break;
         }
         if (write_all(out, buf, (size_t)r) != 0) {
-            (void)close(in);
-            (void)close(out);
-            return -1;
+            saved_errno = errno;
+            result = -1;
+            break;
         }
     }
-    (void)close(in);
-    (void)close(out);
-    return 0;
+    if (close(in) != 0 && result == 0) {
+        saved_errno = errno;
+        result = -1;
+    }
+    if (close(out) != 0 && result == 0) {
+        saved_errno = errno;
+        result = -1;
+    }
+    if (result != 0 && saved_errno != 0) {
+        errno = saved_errno;
+    }
+    return result;
 }
 
 static int copy_tree(const char *src, const char *dst, bool force);
@@ -120,6 +154,7 @@ static int copy_tree(const char *src, const char *dst, bool force);
 static int copy_entry(const char *src, const char *dst, bool recursive, bool force)
 {
     struct stat st;
+    /* TODO: Reduce TOCTOU by using fd-based traversal when OS support is available. */
     if (stat(src, &st) != 0) {
         return -1;
     }
@@ -160,6 +195,8 @@ static int copy_tree(const char *src, const char *dst, bool force)
     }
     struct dirent *ent;
     int failed = 0;
+    int saved_errno = 0;
+    errno = 0;
     while ((ent = readdir(dir)) != NULL) {
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
             continue;
@@ -167,18 +204,33 @@ static int copy_tree(const char *src, const char *dst, bool force)
         char *s = join_path(src, ent->d_name);
         char *d = join_path(dst, ent->d_name);
         if (!s || !d) {
+            if (!saved_errno) {
+                saved_errno = errno ? errno : ENOMEM;
+            }
             failed = 1;
             free(s);
             free(d);
             continue;
         }
         if (copy_entry(s, d, true, force) != 0) {
+            if (!saved_errno) {
+                saved_errno = errno;
+            }
             failed = 1;
         }
         free(s);
         free(d);
     }
+    if (ent == NULL && errno != 0) {
+        if (!saved_errno) {
+            saved_errno = errno;
+        }
+        failed = 1;
+    }
     (void)closedir(dir);
+    if (failed && saved_errno != 0) {
+        errno = saved_errno;
+    }
     return failed ? -1 : 0;
 }
 
@@ -261,4 +313,3 @@ int main(int argc, char **argv)
     }
     return failed ? 1 : 0;
 }
-

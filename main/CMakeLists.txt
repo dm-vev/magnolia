@@ -172,10 +172,13 @@ if(CONFIG_MAGNOLIA_IPC_ENABLED)
     endif()
 endif()
 
+list(APPEND APP_SRCS
+    "kernel/core/net/m_net_app_api.c"
+)
+
 if(CONFIG_MAGNOLIA_NET_ENABLE)
     list(APPEND APP_SRCS
         "kernel/core/net/m_net.c"
-        "kernel/core/net/m_net_app_api.c"
     )
     if(CONFIG_MAGNOLIA_NET_BACKEND_LWIP)
         list(APPEND APP_SRCS

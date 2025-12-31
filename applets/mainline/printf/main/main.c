@@ -12,6 +12,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+/* BSD reference: FreeBSD printf(1). */
+
 struct arg_state {
     int argc;
     char **argv;
@@ -351,6 +353,34 @@ static const char *length_str(enum length_mod length)
     }
 }
 
+static int parse_decimal_limited(const char **p, int cap, bool *saw_digit)
+{
+    unsigned long long v = 0;
+    bool any = false;
+    const unsigned char *s = (const unsigned char *)(*p);
+    unsigned long long cap_u = (unsigned long long)cap;
+
+    while (isdigit(*s)) {
+        unsigned digit = (unsigned)(*s - '0');
+        any = true;
+        if (v < cap_u) {
+            /* Clamp to cap without risking overflow on large widths/precisions. */
+            if (v > (cap_u - digit) / 10u) {
+                v = cap_u;
+            } else {
+                v = v * 10u + digit;
+            }
+        }
+        s++;
+    }
+
+    *p = (const char *)s;
+    if (saw_digit) {
+        *saw_digit = any;
+    }
+    return (int)v;
+}
+
 static int build_format(const struct format_spec *spec, char *buf, size_t cap)
 {
     size_t pos = 0;
@@ -443,15 +473,7 @@ static bool parse_format_spec(const char *p, struct format_spec *spec, size_t *c
         p++;
     } else if (isdigit((unsigned char)*p)) {
         spec->width_specified = true;
-        long long v = 0;
-        while (isdigit((unsigned char)*p)) {
-            v = (v * 10) + (*p - '0');
-            if (v > INT_MAX) {
-                v = INT_MAX;
-            }
-            p++;
-        }
-        spec->width = (int)v;
+        spec->width = parse_decimal_limited(&p, INT_MAX, NULL);
     }
 
     if (*p == '.') {
@@ -461,15 +483,7 @@ static bool parse_format_spec(const char *p, struct format_spec *spec, size_t *c
             spec->precision_from_arg = true;
             p++;
         } else {
-            long long v = 0;
-            while (isdigit((unsigned char)*p)) {
-                v = (v * 10) + (*p - '0');
-                if (v > INT_MAX) {
-                    v = INT_MAX;
-                }
-                p++;
-            }
-            spec->precision = (int)v;
+            spec->precision = parse_decimal_limited(&p, INT_MAX, NULL);
         }
     }
 

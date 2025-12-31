@@ -26,6 +26,38 @@ static void eprintf(const char *fmt, ...)
     (void)write(STDERR_FILENO, buf, len);
 }
 
+static int write_all(int fd, const void *buf, size_t len)
+{
+    const unsigned char *p = (const unsigned char *)buf;
+    size_t off = 0;
+    while (off < len) {
+        ssize_t w = write(fd, p + off, len - off);
+        if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (w == 0) {
+            errno = EIO;
+            return -1;
+        }
+        off += (size_t)w;
+    }
+    return 0;
+}
+
+static int print_path_line(const char *path)
+{
+    /* Emit output via write(2) to catch stdout errors reliably. */
+    size_t len = strlen(path);
+    if ((len && write_all(STDOUT_FILENO, path, len) != 0) ||
+        write_all(STDOUT_FILENO, "\n", 1) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
 static bool pwd_matches_current(const char *pwd)
 {
     /* Only trust $PWD when it really refers to the current directory. */
@@ -96,7 +128,10 @@ int main(int argc, char **argv)
     if (logical) {
         const char *pwd = getenv("PWD");
         if (pwd_matches_current(pwd)) {
-            printf("%s\n", pwd);
+            if (print_path_line(pwd) != 0) {
+                eprintf("pwd: stdout: %s\n", strerror(errno));
+                return 1;
+            }
             return 0;
         }
     }
@@ -105,7 +140,11 @@ int main(int argc, char **argv)
         eprintf("pwd: %s\n", strerror(errno));
         return 1;
     }
-    printf("%s\n", cwd);
+    if (print_path_line(cwd) != 0) {
+        eprintf("pwd: stdout: %s\n", strerror(errno));
+        free(cwd);
+        return 1;
+    }
     free(cwd);
     return 0;
 }

@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -32,6 +33,9 @@ static int write_all(int fd, const void *buf, size_t len)
     while (off < len) {
         ssize_t w = write(fd, p + off, len - off);
         if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
             return -1;
         }
         if (w == 0) {
@@ -41,6 +45,17 @@ static int write_all(int fd, const void *buf, size_t len)
         off += (size_t)w;
     }
     return 0;
+}
+
+static ssize_t read_retry(int fd, void *buf, size_t len)
+{
+    while (1) {
+        ssize_t r = read(fd, buf, len);
+        if (r < 0 && errno == EINTR) {
+            continue;
+        }
+        return r;
+    }
 }
 
 static void usage(void)
@@ -124,7 +139,15 @@ static int skip_input(int fd, uint64_t blocks, size_t ibs)
     if (blocks == 0) {
         return 0;
     }
+    if (ibs > 0 && blocks > (uint64_t)LLONG_MAX / ibs) {
+        errno = EOVERFLOW;
+        return -1;
+    }
     off_t offset = (off_t)(blocks * ibs);
+    if ((uint64_t)offset != blocks * ibs) {
+        errno = EOVERFLOW;
+        return -1;
+    }
     if (lseek(fd, offset, SEEK_CUR) >= 0) {
         return 0;
     }
@@ -134,8 +157,11 @@ static int skip_input(int fd, uint64_t blocks, size_t ibs)
     }
     uint64_t left = blocks;
     while (left > 0) {
-        ssize_t r = read(fd, buf, ibs);
+        ssize_t r = read_retry(fd, buf, ibs);
         if (r <= 0) {
+            if (r == 0) {
+                errno = EIO;
+            }
             free(buf);
             return -1;
         }
@@ -150,7 +176,15 @@ static int seek_output(int fd, uint64_t blocks, size_t obs)
     if (blocks == 0) {
         return 0;
     }
+    if (obs > 0 && blocks > (uint64_t)LLONG_MAX / obs) {
+        errno = EOVERFLOW;
+        return -1;
+    }
     off_t offset = (off_t)(blocks * obs);
+    if ((uint64_t)offset != blocks * obs) {
+        errno = EOVERFLOW;
+        return -1;
+    }
     if (lseek(fd, offset, SEEK_CUR) >= 0) {
         return 0;
     }
@@ -345,25 +379,51 @@ int main(int argc, char **argv)
     uint64_t out_part = 0;
     uint64_t blocks = 0;
     size_t obuf_len = 0;
+    int exit_status = 0;
 
     while (!use_count || blocks < count) {
-        ssize_t r = read(in_fd, ibuf, (size_t)ibs);
+        bool read_error_block = false;
+        bool have_block = false;
+        size_t n = 0;
+        ssize_t r = read_retry(in_fd, ibuf, (size_t)ibs);
         if (r < 0) {
-            if (noerror) {
-                eprintf("dd: read error: %s\n", strerror(errno));
-                continue;
-            }
             eprintf("dd: read error: %s\n", strerror(errno));
+            exit_status = 1;
+            if (noerror) {
+                if (sync) {
+                    memset(ibuf, 0, (size_t)ibs);
+                    read_error_block = true;
+                    n = (size_t)ibs;
+                    have_block = true;
+                } else {
+                    /* Skip a failed input block to avoid retrying the same offset forever. */
+                    if (ibs > (size_t)LLONG_MAX) {
+                        break;
+                    }
+                    if (lseek(in_fd, (off_t)ibs, SEEK_CUR) >= 0) {
+                        blocks++;
+                        continue;
+                    }
+                    break;
+                }
+            } else {
+                break;
+            }
+        } else if (r == 0) {
             break;
         }
-        if (r == 0) {
-            break;
+        if (!have_block) {
+            n = (size_t)r;
+            have_block = true;
         }
-        size_t n = (size_t)r;
-        if (n == (size_t)ibs) {
-            in_full++;
-        } else {
+        if (read_error_block) {
             in_part++;
+        } else {
+            if (n == (size_t)ibs) {
+                in_full++;
+            } else {
+                in_part++;
+            }
         }
         if (sync && n < (size_t)ibs) {
             memset(ibuf + n, 0, (size_t)ibs - n);
@@ -372,6 +432,7 @@ int main(int argc, char **argv)
         if (obs == ibs) {
             if (write_all(out_fd, ibuf, n) != 0) {
                 eprintf("dd: write error: %s\n", strerror(errno));
+                exit_status = 1;
                 break;
             }
             if (n == (size_t)obs) {
@@ -393,6 +454,7 @@ int main(int argc, char **argv)
                 if (obuf_len == (size_t)obs) {
                     if (write_all(out_fd, obuf, (size_t)obs) != 0) {
                         eprintf("dd: write error: %s\n", strerror(errno));
+                        exit_status = 1;
                         off = n;
                         obuf_len = 0;
                         goto done;
@@ -408,6 +470,7 @@ int main(int argc, char **argv)
     if (obuf_len > 0) {
         if (write_all(out_fd, obuf, obuf_len) != 0) {
             eprintf("dd: write error: %s\n", strerror(errno));
+            exit_status = 1;
         } else {
             out_part++;
         }
@@ -427,5 +490,5 @@ done:
     }
     free(ibuf);
     free(obuf);
-    return 0;
+    return exit_status;
 }

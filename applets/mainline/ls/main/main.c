@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -116,6 +117,7 @@ static int ls_dir(const char *path, const ls_opts_t *opts)
     size_t count = 0;
     char **names = NULL;
 
+    errno = 0;
     struct dirent *ent;
     while ((ent = readdir(dir)) != NULL) {
         if (!opts->all && ent->d_name[0] == '.') {
@@ -148,6 +150,15 @@ static int ls_dir(const char *path, const ls_opts_t *opts)
         }
         count++;
     }
+    if (ent == NULL && errno != 0) {
+        eprintf("ls: %s: %s\n", path, strerror(errno));
+        (void)closedir(dir);
+        for (size_t i = 0; i < count; ++i) {
+            free(names[i]);
+        }
+        free(names);
+        return 1;
+    }
     (void)closedir(dir);
 
     qsort(names, count, sizeof(*names), cmp_strptr);
@@ -160,7 +171,16 @@ static int ls_dir(const char *path, const ls_opts_t *opts)
         }
         size_t plen = strlen(path);
         bool need_slash = (plen > 0 && path[plen - 1] != '/');
-        size_t full_len = plen + (need_slash ? 1 : 0) + strlen(name) + 1;
+        size_t name_len = strlen(name);
+        size_t extra = (need_slash ? 1 : 0) + name_len + 1;
+        if (plen > SIZE_MAX - extra) {
+            errno = ENAMETOOLONG;
+            eprintf("ls: %s/%s: %s\n", path, name, strerror(errno));
+            failed = 1;
+            free(name);
+            continue;
+        }
+        size_t full_len = plen + extra;
         char *full = (char *)malloc(full_len);
         if (!full) {
             eprintf("ls: %s/%s: out of memory\n", path, name);
@@ -186,6 +206,7 @@ static int ls_dir(const char *path, const ls_opts_t *opts)
 int main(int argc, char **argv)
 {
     ls_opts_t opts = {0};
+    /* FreeBSD ls(1) compatibility: support the common -a/-d/-l/-1 set. */
     const char *paths[argc > 1 ? (size_t)argc - 1 : 1];
     int n_paths = 0;
     bool parse_opts = true;

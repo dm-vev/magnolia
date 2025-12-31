@@ -6,10 +6,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+/*
+ * BSD reference: FreeBSD du(1).
+ * Behavior: supports -a and -s, reports 1 KiB blocks, and does not follow
+ * symlinks during traversal.
+ * Edge cases: long paths report ENAMETOOLONG; unreadable dirs propagate errno.
+ */
 static const char *g_version = "Magnolia coreutils 0.1";
 
 static void eprintf(const char *fmt, ...)
@@ -39,7 +46,12 @@ static char *join_path(const char *dir, const char *name)
     size_t dlen = strlen(dir);
     size_t nlen = strlen(name);
     bool need_slash = (dlen > 0 && dir[dlen - 1] != '/');
-    size_t total = dlen + (need_slash ? 1 : 0) + nlen + 1;
+    size_t extra = (need_slash ? 1 : 0) + nlen + 1;
+    if (dlen > SIZE_MAX - extra) {
+        errno = ENAMETOOLONG;
+        return NULL;
+    }
+    size_t total = dlen + extra;
     char *out = (char *)malloc(total);
     if (!out) {
         errno = ENOMEM;
@@ -66,7 +78,7 @@ static unsigned long long blocks_1k(off_t size)
 static int du_walk(const char *path, bool all, bool summary, unsigned long long *out_blocks)
 {
     struct stat st;
-    if (stat(path, &st) != 0) {
+    if (lstat(path, &st) != 0) {
         return -1;
     }
 
@@ -77,6 +89,7 @@ static int du_walk(const char *path, bool all, bool summary, unsigned long long 
             return -1;
         }
         struct dirent *ent;
+        errno = 0;
         while ((ent = readdir(dir)) != NULL) {
             if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
                 continue;
@@ -97,6 +110,12 @@ static int du_walk(const char *path, bool all, bool summary, unsigned long long 
                 printf("%llu\t%s\n", child_blocks, child);
             }
             free(child);
+        }
+        if (errno != 0) {
+            int err = errno;
+            (void)closedir(dir);
+            errno = err;
+            return -1;
         }
         (void)closedir(dir);
     }
