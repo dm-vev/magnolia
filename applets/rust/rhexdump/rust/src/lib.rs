@@ -5,6 +5,7 @@ extern crate alloc;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use magnolia_applet::errno::{Error, EINTR};
 use magnolia_applet::fs;
 use magnolia_applet::io;
 use magnolia_applet::sys;
@@ -253,30 +254,71 @@ fn print_line(mode: FormatMode, offset: u64, buf: &[u8], len: usize) {
         }
     }
     line.push('\n');
-    let _ = io::write_all(sys::STDOUT_FILENO, line.as_bytes());
+    let _ = write_all_retry(sys::STDOUT_FILENO, line.as_bytes());
 }
 
-fn skip_bytes(fd: i32, skip: &mut u64) -> bool {
+fn write_all_retry(fd: i32, mut buf: &[u8]) -> Result<(), Error> {
+    while !buf.is_empty() {
+        let n = unsafe { sys::write(fd, buf.as_ptr().cast(), buf.len()) };
+        if n < 0 {
+            let err = Error::last();
+            if err.errno == EINTR {
+                continue;
+            }
+            return Err(err);
+        }
+        if n == 0 {
+            return Err(Error { errno: 5 });
+        }
+        buf = &buf[n as usize..];
+    }
+    Ok(())
+}
+
+fn read_retry(fd: i32, buf: &mut [u8]) -> Result<usize, Error> {
+    loop {
+        match io::read(fd, buf) {
+            Ok(read) => return Ok(read),
+            // Retry interrupted syscalls to avoid spurious failures.
+            Err(err) if err.errno == EINTR => continue,
+            Err(err) => return Err(err),
+        }
+    }
+}
+
+fn skip_bytes(fd: i32, skip: &mut u64, offset: &mut u64) -> bool {
     if *skip == 0 {
         return true;
     }
-    let offset = *skip as sys::off_t;
-    let rc = unsafe { sys::lseek(fd, offset, sys::SEEK_CUR) };
-    if rc >= 0 {
-        *skip = 0;
-        return true;
+    // Skip via lseek only when the skip count fits into off_t.
+    if *skip <= sys::off_t::MAX as u64 {
+        let seek_offset = *skip as sys::off_t;
+        let rc = unsafe { sys::lseek(fd, seek_offset, sys::SEEK_CUR) };
+        if rc >= 0 {
+            match offset.checked_add(*skip) {
+                Some(next) => *offset = next,
+                None => return false,
+            }
+            *skip = 0;
+            return true;
+        }
     }
     let mut buf = [0u8; 256];
     while *skip > 0 {
         let want = if *skip < buf.len() as u64 { *skip as usize } else { buf.len() };
-        let n = io::read(fd, &mut buf[..want]);
-        if let Ok(read) = n {
-            if read == 0 {
-                return false;
+        let n = read_retry(fd, &mut buf[..want]);
+        match n {
+            Ok(read) => {
+                if read == 0 {
+                    return false;
+                }
+                match offset.checked_add(read as u64) {
+                    Some(next) => *offset = next,
+                    None => return false,
+                }
+                *skip -= read as u64;
             }
-            *skip -= read as u64;
-        } else {
-            return false;
+            Err(_) => return false,
         }
     }
     true
@@ -291,7 +333,7 @@ fn hexdump_fd(fd: i32, name: &str, mode: FormatMode, verbose: bool, offset: &mut
 
     loop {
         if *skip > 0 {
-            if !skip_bytes(fd, skip) {
+            if !skip_bytes(fd, skip, offset) {
                 return false;
             }
         }
@@ -305,7 +347,7 @@ fn hexdump_fd(fd: i32, name: &str, mode: FormatMode, verbose: bool, offset: &mut
             }
         }
         let mut buf = [0u8; LINE_BYTES];
-        let n = match io::read(fd, &mut buf[..want]) {
+        let n = match read_retry(fd, &mut buf[..want]) {
             Ok(v) => v,
             Err(_) => {
                 magnolia_applet::eprintln!("hexdump: {}: read error", name);
@@ -321,7 +363,7 @@ fn hexdump_fd(fd: i32, name: &str, mode: FormatMode, verbose: bool, offset: &mut
         let same = !verbose && prev_len == n && prev[..n] == buf[..n];
         if same {
             if !suppressed {
-                let _ = io::write_all(sys::STDOUT_FILENO, b"*\n");
+                let _ = write_all_retry(sys::STDOUT_FILENO, b"*\n");
                 suppressed = true;
             }
         } else {
@@ -389,6 +431,8 @@ fn hexdump_main(args: &[String]) -> i32 {
                     return 1;
                 }
             }
+        } else if arg == "-" {
+            files.push(arg.to_string());
         } else if arg.starts_with('-') {
             magnolia_applet::eprintln!("usage: hexdump [-bcdoxC] [-n length] [-s offset] [-v] [file ...]");
             return 1;
@@ -411,17 +455,24 @@ fn hexdump_main(args: &[String]) -> i32 {
         }
     } else {
         for path in files {
-            let fd = match fs::File::open(&path, sys::O_RDONLY, 0) {
-                Ok(f) => f.fd(),
-                Err(err) => {
-                    magnolia_applet::eprintln!("hexdump: {}: errno={}", path, err.errno);
-                    rc = 1;
-                    continue;
-                }
+            let ok = if path == "-" {
+                hexdump_fd(sys::STDIN_FILENO, "-", mode, verbose, &mut offset,
+                           if use_length { Some(&mut remaining) } else { None },
+                           &mut skip)
+            } else {
+                let file = match fs::File::open(&path, sys::O_RDONLY, 0) {
+                    Ok(f) => f,
+                    Err(err) => {
+                        magnolia_applet::eprintln!("hexdump: {}: errno={}", path, err.errno);
+                        rc = 1;
+                        continue;
+                    }
+                };
+                let fd = file.fd();
+                hexdump_fd(fd, &path, mode, verbose, &mut offset,
+                           if use_length { Some(&mut remaining) } else { None },
+                           &mut skip)
             };
-            let ok = hexdump_fd(fd, &path, mode, verbose, &mut offset,
-                                if use_length { Some(&mut remaining) } else { None },
-                                &mut skip);
             if !ok {
                 rc = 1;
             }
@@ -434,7 +485,7 @@ fn hexdump_main(args: &[String]) -> i32 {
     let mut tail = String::new();
     push_hex(&mut tail, offset, 8);
     tail.push('\n');
-    let _ = io::write_all(sys::STDOUT_FILENO, tail.as_bytes());
+    let _ = write_all_retry(sys::STDOUT_FILENO, tail.as_bytes());
     rc
 }
 

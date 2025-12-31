@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -759,6 +760,21 @@ static void gracefulExit(void)
     fflush(stdout);
 }
 
+static int parse_env_dim(const char *value)
+{
+    if (value == NULL || *value == '\0') {
+        return 0;
+    }
+
+    errno = 0;
+    char *end = NULL;
+    long parsed = strtol(value, &end, 10);
+    if (end == value || errno == ERANGE || parsed < 0 || parsed > INT_MAX) {
+        return 0;
+    }
+    return (int)parsed;
+}
+
 void clampScreenSize(void)
 {
     if (rows < 2)
@@ -853,11 +869,11 @@ void getScreenSize(void)
     }
     // environment variables trump all
     if (lines)
-        rows = atoi(lines);
+        rows = parse_env_dim(lines);
     else if (win.ws_row)
         rows = win.ws_row;
     if (cols)
-        columns = atoi(cols);
+        columns = parse_env_dim(cols);
     else if (win.ws_col)
         columns = win.ws_col;
 }
@@ -890,10 +906,10 @@ int vi_main(int argc, char **argv)
     { // try to get terminal dimensions from environment
         char *txt = getenv("LINES");
         if (txt)
-            rows = atoi(txt);
+            rows = parse_env_dim(txt);
         txt = getenv("COLUMNS");
         if (txt)
-            columns = atoi(txt);
+            columns = parse_env_dim(txt);
         clampScreenSize();
     }
 #endif
