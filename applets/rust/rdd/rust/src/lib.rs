@@ -123,7 +123,8 @@ fn skip_input(fd: i32, blocks: u64, ibs: usize) -> bool {
         match read_retry(fd, &mut buf) {
             Ok(n) => {
                 if n == 0 {
-                    return false;
+                    // EOF while skipping is not an error; stop skipping and proceed.
+                    return true;
                 }
             }
             Err(_) => return false,
@@ -185,21 +186,39 @@ fn dd_main(args: &[String]) -> i32 {
             "if" => ifile = Some(val.to_string()),
             "of" => ofile = Some(val.to_string()),
             "ibs" => match parse_size(val) {
-                Some(v) => ibs = v,
+                Some(v) => {
+                    if v > usize::MAX as u64 {
+                        magnolia_applet::eprintln!("dd: invalid ibs '{}'", val);
+                        return 1;
+                    }
+                    ibs = v;
+                }
                 None => {
                     magnolia_applet::eprintln!("dd: invalid ibs '{}'", val);
                     return 1;
                 }
             },
             "obs" => match parse_size(val) {
-                Some(v) => obs = v,
+                Some(v) => {
+                    if v > usize::MAX as u64 {
+                        magnolia_applet::eprintln!("dd: invalid obs '{}'", val);
+                        return 1;
+                    }
+                    obs = v;
+                }
                 None => {
                     magnolia_applet::eprintln!("dd: invalid obs '{}'", val);
                     return 1;
                 }
             },
             "bs" => match parse_size(val) {
-                Some(v) => bs = v,
+                Some(v) => {
+                    if v > usize::MAX as u64 {
+                        magnolia_applet::eprintln!("dd: invalid bs '{}'", val);
+                        return 1;
+                    }
+                    bs = v;
+                }
                 None => {
                     magnolia_applet::eprintln!("dd: invalid bs '{}'", val);
                     return 1;
@@ -322,24 +341,53 @@ fn dd_main(args: &[String]) -> i32 {
     let mut out_full = 0u64;
     let mut out_part = 0u64;
     let mut blocks = 0u64;
+    let mut exit_status = 0i32;
 
     while !use_count || blocks < count {
+        let mut read_error_block = false;
+        let mut have_block = false;
+        let mut n = 0usize;
         let r = read_retry(in_fd, &mut ibuf);
-        let n = match r {
-            Ok(v) => v,
-            Err(_) => {
-                if noerror {
-                    magnolia_applet::eprintln!("dd: read error");
-                    continue;
+        match r {
+            Ok(v) => {
+                if v == 0 {
+                    break;
                 }
-                magnolia_applet::eprintln!("dd: read error");
-                break;
+                n = v;
+                have_block = true;
             }
-        };
-        if n == 0 {
+            Err(_) => {
+                magnolia_applet::eprintln!("dd: read error");
+                exit_status = 1;
+                if noerror {
+                    if sync {
+                        for b in ibuf.iter_mut() {
+                            *b = 0;
+                        }
+                        n = ibs as usize;
+                        read_error_block = true;
+                        have_block = true;
+                    } else {
+                        if ibs <= sys::off_t::MAX as u64 {
+                            let rc = unsafe { sys::lseek(in_fd, ibs as sys::off_t, sys::SEEK_CUR) };
+                            if rc >= 0 {
+                                blocks += 1;
+                                continue;
+                            }
+                        }
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+        if !have_block {
             break;
         }
-        if n == ibs as usize {
+        if read_error_block {
+            in_part += 1;
+        } else if n == ibs as usize {
             in_full += 1;
         } else {
             in_part += 1;
@@ -354,6 +402,7 @@ fn dd_main(args: &[String]) -> i32 {
         if obs == ibs {
             if write_all(out_fd, &ibuf[..chunk_len]).is_err() {
                 magnolia_applet::eprintln!("dd: write error");
+                exit_status = 1;
                 break;
             }
             if chunk_len == obs as usize {
@@ -372,6 +421,7 @@ fn dd_main(args: &[String]) -> i32 {
                 if obuf_len == obs as usize {
                     if write_all(out_fd, &obuf).is_err() {
                         magnolia_applet::eprintln!("dd: write error");
+                        exit_status = 1;
                         obuf_len = 0;
                         off = chunk_len;
                         break;
@@ -387,6 +437,7 @@ fn dd_main(args: &[String]) -> i32 {
     if obuf_len > 0 {
         if write_all(out_fd, &obuf[..obuf_len]).is_err() {
             magnolia_applet::eprintln!("dd: write error");
+            exit_status = 1;
         } else {
             out_part += 1;
         }
@@ -399,7 +450,7 @@ fn dd_main(args: &[String]) -> i32 {
 
     drop(in_file);
     drop(out_file);
-    0
+    exit_status
 }
 
 fn args_to_vec(args: Args) -> Vec<String> {

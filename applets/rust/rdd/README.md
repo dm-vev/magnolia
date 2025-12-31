@@ -11,3 +11,5 @@
 - Large skip/seek values that do not fit in off_t fall back to read-and-discard
   or zero-fill loops instead of seek.
 - Short reads during skip stop the copy loop, matching EOF behavior.
+- Input read errors with conv=noerror keep processing, and conv=sync pads the
+  block with zeros as in FreeBSD dd(1).
