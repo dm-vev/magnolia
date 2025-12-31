@@ -8,7 +8,28 @@
 #include <string.h>
 #include <unistd.h>
 
-static void oprintf(const char *fmt, ...)
+static int write_all(int fd, const void *buf, size_t len)
+{
+    const unsigned char *p = (const unsigned char *)buf;
+    size_t off = 0;
+    while (off < len) {
+        ssize_t w = write(fd, p + off, len - off);
+        if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (w == 0) {
+            errno = EIO;
+            return -1;
+        }
+        off += (size_t)w;
+    }
+    return 0;
+}
+
+static int oprintf(const char *fmt, ...)
 {
     char buf[512];
     va_list ap;
@@ -16,13 +37,13 @@ static void oprintf(const char *fmt, ...)
     int n = vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     if (n <= 0) {
-        return;
+        return 0;
     }
     size_t len = (size_t)n;
     if (len >= sizeof(buf)) {
         len = sizeof(buf) - 1;
     }
-    (void)write(STDOUT_FILENO, buf, len);
+    return write_all(STDOUT_FILENO, buf, len);
 }
 
 static void eprintf(const char *fmt, ...)
@@ -39,7 +60,84 @@ static void eprintf(const char *fmt, ...)
     if (len >= sizeof(buf)) {
         len = sizeof(buf) - 1;
     }
-    (void)write(STDERR_FILENO, buf, len);
+    (void)write_all(STDERR_FILENO, buf, len);
+}
+
+static int size_mul(size_t a, size_t b, size_t *out)
+{
+    if (a != 0 && b > SIZE_MAX / a) {
+        return -1;
+    }
+    *out = a * b;
+    return 0;
+}
+
+static int size_add(size_t a, size_t b, size_t *out)
+{
+    if (a > SIZE_MAX - b) {
+        return -1;
+    }
+    *out = a + b;
+    return 0;
+}
+
+static int append_fmt(char *buf, size_t cap, size_t *pos, const char *fmt, ...)
+{
+    if (*pos >= cap) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf + *pos, cap - *pos, fmt, ap);
+    va_end(ap);
+    if (n < 0) {
+        return -1;
+    }
+    if ((size_t)n >= cap - *pos) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+    *pos += (size_t)n;
+    return 0;
+}
+
+static int calc_line_capacity(int columns, int group, size_t *out)
+{
+    if (columns <= 0) {
+        *out = 0;
+        return 0;
+    }
+    size_t cols = (size_t)columns;
+    size_t total = 0;
+    size_t tmp = 0;
+
+    /* "%08llx: " prefix is 10 bytes, then hex, spacer, ASCII, and newline. */
+    if (size_add(total, 10, &total) != 0) {
+        return -1;
+    }
+    if (size_mul(cols, 2, &tmp) != 0 || size_add(total, tmp, &total) != 0) {
+        return -1;
+    }
+    if (group > 0) {
+        if (size_add(total, cols / (size_t)group, &total) != 0) {
+            return -1;
+        }
+    }
+    if (size_add(total, 1, &total) != 0) {
+        return -1;
+    }
+    if (size_add(total, cols, &total) != 0) {
+        return -1;
+    }
+    if (size_add(total, 1, &total) != 0) {
+        return -1;
+    }
+    if (size_add(total, 1, &total) != 0) {
+        return -1;
+    }
+    *out = total;
+    return 0;
 }
 
 static int parse_token(const char *s, char **end_out, uint64_t *value)
@@ -189,7 +287,7 @@ static int reverse_stream(int fd)
                         unsigned char byte = (unsigned char)((half << 4) | v);
                         outbuf[out_len++] = byte;
                         if (out_len == sizeof(outbuf)) {
-                            if (write(STDOUT_FILENO, outbuf, out_len) != (ssize_t)out_len) {
+                            if (write_all(STDOUT_FILENO, outbuf, out_len) != 0) {
                                 return -1;
                             }
                             out_len = 0;
@@ -224,7 +322,7 @@ static int reverse_stream(int fd)
                 unsigned char byte = (unsigned char)((half << 4) | v);
                 outbuf[out_len++] = byte;
                 if (out_len == sizeof(outbuf)) {
-                    if (write(STDOUT_FILENO, outbuf, out_len) != (ssize_t)out_len) {
+                    if (write_all(STDOUT_FILENO, outbuf, out_len) != 0) {
                         return -1;
                     }
                     out_len = 0;
@@ -235,7 +333,7 @@ static int reverse_stream(int fd)
     }
 
     if (out_len > 0) {
-        if (write(STDOUT_FILENO, outbuf, out_len) != (ssize_t)out_len) {
+        if (write_all(STDOUT_FILENO, outbuf, out_len) != 0) {
             return -1;
         }
     }
@@ -247,6 +345,18 @@ static int xxd_forward(int fd, uint64_t skip, uint64_t length, bool use_length,
 {
     if (skip_bytes(fd, &skip) != 0) {
         return -1;
+    }
+    char *line = NULL;
+    size_t line_cap = 0;
+    if (!plain) {
+        if (calc_line_capacity(columns, group, &line_cap) != 0) {
+            errno = EOVERFLOW;
+            return -1;
+        }
+        line = (char *)malloc(line_cap);
+        if (line == NULL) {
+            return -1;
+        }
     }
     uint64_t offset = 0;
     unsigned char buf[256];
@@ -265,32 +375,70 @@ static int xxd_forward(int fd, uint64_t skip, uint64_t length, bool use_length,
         size_t len = (size_t)r;
         if (plain) {
             for (size_t i = 0; i < len; ++i) {
-                oprintf(upper ? "%02X" : "%02x", buf[i]);
+                if (oprintf(upper ? "%02X" : "%02x", buf[i]) != 0) {
+                    free(line);
+                    return -1;
+                }
                 if (i + 1 == len || ((i + 1) % (size_t)columns) == 0) {
-                    oprintf("\n");
+                    if (oprintf("\n") != 0) {
+                        free(line);
+                        return -1;
+                    }
                 }
             }
         } else {
-            char line[512];
             size_t pos = 0;
-            pos += (size_t)snprintf(line + pos, sizeof(line) - pos, "%08llx: ", (unsigned long long)offset);
+            if (append_fmt(line, line_cap, &pos, "%08llx: ", (unsigned long long)offset) != 0) {
+                free(line);
+                return -1;
+            }
             for (size_t i = 0; i < (size_t)columns; ++i) {
                 if (i < len) {
-                    pos += (size_t)snprintf(line + pos, sizeof(line) - pos, upper ? "%02X" : "%02x", buf[i]);
+                    if (append_fmt(line, line_cap, &pos,
+                                   upper ? "%02X" : "%02x", buf[i]) != 0) {
+                        free(line);
+                        return -1;
+                    }
                 } else {
-                    pos += (size_t)snprintf(line + pos, sizeof(line) - pos, "  ");
+                    if (append_fmt(line, line_cap, &pos, "  ") != 0) {
+                        free(line);
+                        return -1;
+                    }
                 }
                 if (group > 0 && ((i + 1) % (size_t)group) == 0) {
+                    if (pos >= line_cap) {
+                        errno = EOVERFLOW;
+                        free(line);
+                        return -1;
+                    }
                     line[pos++] = ' ';
                 }
+            }
+            if (pos >= line_cap) {
+                errno = EOVERFLOW;
+                free(line);
+                return -1;
             }
             line[pos++] = ' ';
             for (size_t i = 0; i < len; ++i) {
                 unsigned char b = buf[i];
+                if (pos >= line_cap) {
+                    errno = EOVERFLOW;
+                    free(line);
+                    return -1;
+                }
                 line[pos++] = (b >= 0x20 && b <= 0x7e) ? (char)b : '.';
             }
+            if (pos >= line_cap) {
+                errno = EOVERFLOW;
+                free(line);
+                return -1;
+            }
             line[pos++] = '\n';
-            (void)write(STDOUT_FILENO, line, pos);
+            if (write_all(STDOUT_FILENO, line, pos) != 0) {
+                free(line);
+                return -1;
+            }
         }
         offset += len;
         if (use_length) {
@@ -300,6 +448,7 @@ static int xxd_forward(int fd, uint64_t skip, uint64_t length, bool use_length,
             }
         }
     }
+    free(line);
     return 0;
 }
 

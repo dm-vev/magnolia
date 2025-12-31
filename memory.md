@@ -46,3 +46,4 @@
 - Fixed mainline `rm` path concatenation overflow that could under-allocate and OOB-write on very long directory/entry names. Cause: unchecked `size_t` addition in `join_path`. Fix: explicit overflow guard returning `ENAMETOOLONG`.
 - Fixed mainline `vi` status buffer overflows that could corrupt memory or crash on long status messages. Cause: unbounded `vsprintf`/`sprintf` into a fixed 200-byte buffer. Fix: use `vsnprintf`/`snprintf` with explicit truncation and safe standout prefix/suffix handling.
 - Updated mainline `date` to handle empty `+` formats without error, grow the `strftime` buffer defensively, and report stdout errors consistently (FreeBSD date(1) behavior).
+- Fixed mainline `xxd` line assembly overflow that could OOB-write on large `-c` column counts. Cause: `snprintf` return values advanced past a 512-byte stack buffer. Fix: compute required line capacity, allocate dynamically, and append with overflow checks plus robust stdout writes.
