@@ -10,6 +10,8 @@
 #include <string.h>
 #include <unistd.h>
 
+/* BSD reference: FreeBSD cut(1). */
+
 typedef struct {
     size_t start;
     size_t end; /* SIZE_MAX for open-ended ranges. */
@@ -278,6 +280,10 @@ static int cut_fields_line(const char *line, size_t len, const range_t *ranges, 
             }
             first_out = false;
         }
+        if (field == SIZE_MAX) {
+            errno = EOVERFLOW;
+            return -1;
+        }
         field++;
         start = j + 1;
     }
@@ -313,9 +319,14 @@ static int cut_stream_fields(int fd, const range_t *ranges, size_t n, char delim
                 len = 0;
                 continue;
             }
-            if (len + 1 > cap) {
+            if (len == SIZE_MAX) {
+                errno = EOVERFLOW;
+                goto fail;
+            }
+            size_t needed = len + 1;
+            if (needed > cap) {
                 size_t next = cap ? (cap * 2u) : 128u;
-                while (next < len + 1) {
+                while (next < needed) {
                     if (next > SIZE_MAX / 2u) {
                         errno = EOVERFLOW;
                         goto fail;
