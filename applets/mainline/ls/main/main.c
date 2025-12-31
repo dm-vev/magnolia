@@ -54,7 +54,21 @@ static char *xstrdup(const char *s)
 
 static void mode_string(mode_t mode, char out[11])
 {
-    out[0] = S_ISDIR(mode) ? 'd' : S_ISCHR(mode) ? 'c' : S_ISBLK(mode) ? 'b' : '-';
+    if (S_ISDIR(mode)) {
+        out[0] = 'd';
+    } else if (S_ISCHR(mode)) {
+        out[0] = 'c';
+    } else if (S_ISBLK(mode)) {
+        out[0] = 'b';
+    } else if (S_ISLNK(mode)) {
+        out[0] = 'l';
+    } else if (S_ISFIFO(mode)) {
+        out[0] = 'p';
+    } else if (S_ISSOCK(mode)) {
+        out[0] = 's';
+    } else {
+        out[0] = '-';
+    }
     out[1] = (mode & S_IRUSR) ? 'r' : '-';
     out[2] = (mode & S_IWUSR) ? 'w' : '-';
     out[3] = (mode & S_IXUSR) ? 'x' : '-';
@@ -75,7 +89,7 @@ static int ls_print(const char *display, const char *path, const ls_opts_t *opts
     }
 
     struct stat st;
-    if (stat(path, &st) != 0) {
+    if (lstat(path, &st) != 0) {
         eprintf("ls: %s: %s\n", path, strerror(errno));
         return 1;
     }
@@ -98,7 +112,10 @@ static int ls_print(const char *display, const char *path, const ls_opts_t *opts
 static int ls_dir(const char *path, const ls_opts_t *opts)
 {
     struct stat st;
-    if (stat(path, &st) != 0) {
+    size_t plen = strlen(path);
+    bool ends_with_slash = (plen > 0 && path[plen - 1] == '/');
+    /* Preserve BSD behavior: symlinks are listed unless the path ends with '/'. */
+    if ((ends_with_slash ? stat(path, &st) : lstat(path, &st)) != 0) {
         eprintf("ls: %s: %s\n", path, strerror(errno));
         return 1;
     }
@@ -125,6 +142,15 @@ static int ls_dir(const char *path, const ls_opts_t *opts)
         }
         if (count == cap) {
             size_t next = cap ? cap * 2 : 32;
+            if (next > SIZE_MAX / sizeof(*names)) {
+                eprintf("ls: %s: out of memory\n", path);
+                for (size_t i = 0; i < count; ++i) {
+                    free(names[i]);
+                }
+                free(names);
+                (void)closedir(dir);
+                return 1;
+            }
             char **tmp = (char **)realloc(names, next * sizeof(*names));
             if (!tmp) {
                 eprintf("ls: %s: out of memory\n", path);
@@ -254,7 +280,10 @@ int main(int argc, char **argv)
         const char *path = paths[i];
         if (n_paths > 1) {
             struct stat st;
-            if (stat(path, &st) == 0 && S_ISDIR(st.st_mode) && !opts.list_dirs) {
+            size_t plen = strlen(path);
+            bool ends_with_slash = (plen > 0 && path[plen - 1] == '/');
+            if ((ends_with_slash ? stat(path, &st) : lstat(path, &st)) == 0 &&
+                S_ISDIR(st.st_mode) && !opts.list_dirs) {
                 printf("%s:\n", path);
             }
         }
