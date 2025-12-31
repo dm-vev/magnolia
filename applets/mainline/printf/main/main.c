@@ -280,9 +280,17 @@ static int parse_escape(const char *s, size_t *idx, unsigned char *out, bool *st
         }
         *out = 'c';
         return 1;
-    case '0': {
-        unsigned value = 0;
-        unsigned digits = 0;
+    case '0':
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7': {
+        /* BSD printf: \[0-7]{1,3} is an octal byte escape. */
+        unsigned value = (unsigned)(c - '0');
+        unsigned digits = 1;
         while (digits < 3) {
             char d = s[*idx + 1];
             if (d < '0' || d > '7') {
