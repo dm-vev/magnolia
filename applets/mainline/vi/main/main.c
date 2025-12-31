@@ -767,9 +767,9 @@ static int parse_env_dim(const char *value)
     }
 
     errno = 0;
-    char *end = NULL;
-    long parsed = strtol(value, &end, 10);
-    if (end == value || errno == ERANGE || parsed < 0 || parsed > INT_MAX) {
+    char *endptr = NULL;
+    long parsed = strtol(value, &endptr, 10);
+    if (endptr == value || errno == ERANGE || parsed < 0 || parsed > INT_MAX) {
         return 0;
     }
     return (int)parsed;
@@ -2946,21 +2946,32 @@ static char *get_input_line(const char *prompt)
 
     char c;
     int i;
+    const char *prompt_str = prompt ? prompt : "";
 
     *displayed_buffer = 0; // force status update
     cmd_mode |= CMODE_LINE_INPUT;
-    strcpy(buf, prompt);
+    size_t prompt_cap = STATUS_BUFFER_LEN - 1;
+    size_t prompt_len = 0;
+    if (prompt_str) {
+        size_t max_prompt = prompt_cap < (size_t)MAX_INPUT_LEN ? prompt_cap : (size_t)MAX_INPUT_LEN;
+        prompt_len = strnlen(prompt_str, max_prompt);
+        memcpy(buf, prompt_str, prompt_len);
+    }
+    buf[prompt_len] = '\0';
     place_cursor(rows - 1, 0, FALSE); // go to Status line, bottom of screen
     clear_to_eol();                   // clear the line
-    write1(prompt);                   // write out the :, /, or ? prompt
+    write1(prompt_str);               // write out the :, /, or ? prompt
 
-    i = strlen(buf);
+    i = (int)prompt_len;
     while (i < MAX_INPUT_LEN) {
         c = get_one_char();
         if (c == '\n' || c == '\r' || c == 27)
             break; // this is end of input
         if (c == erase_char || c == 8 || c == 127) {
             // user wants to erase prev char
+            if (i <= 0) {
+                break;
+            }
             buf[--i] = '\0';
             write1("\b \b"); // erase char on screen
             if (i <= 0)      // user backs up before b-o-l, exit
@@ -2972,7 +2983,10 @@ static char *get_input_line(const char *prompt)
         }
     }
     cmd_mode &= ~CMODE_LINE_INPUT;
-    return strcpy(get_input_line__buf, buf);
+    size_t len = strnlen(buf, (size_t)MAX_INPUT_LEN);
+    memcpy(get_input_line__buf, buf, len);
+    get_input_line__buf[len] = '\0';
+    return get_input_line__buf;
 #undef buf
 }
 
