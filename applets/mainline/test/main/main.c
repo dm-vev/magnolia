@@ -7,6 +7,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* BSD reference: FreeBSD test(1). */
+
 static const char *g_version = "Magnolia coreutils 0.1";
 
 static void eprintf(const char *fmt, ...)
@@ -142,6 +144,10 @@ static int eval(int argc, char **argv, bool *out)
     }
 
     if (argc >= 1 && streq(argv[0], "!")) {
+        if (argc == 1) {
+            /* BSD test(1): "!" requires an operand. */
+            return 2;
+        }
         bool inner = false;
         int rc = eval(argc - 1, argv + 1, &inner);
         if (rc != 0) {
@@ -210,4 +216,3 @@ int main(int argc, char **argv)
     }
     return result ? 0 : 1;
 }
-
