@@ -8,6 +8,8 @@
 #include <string.h>
 #include <unistd.h>
 
+/* BSD reference: FreeBSD comm(1). */
+
 struct line_buffer {
     char *data;
     size_t len;
@@ -149,6 +151,11 @@ static int read_line(struct line_reader *reader)
                 if (reader->line.len == 0) {
                     return 0;
                 }
+                // Guard size_t wrap on extremely long lines before reserving space for NUL.
+                if (reader->line.len > SIZE_MAX - 1) {
+                    errno = EOVERFLOW;
+                    return -1;
+                }
                 if (line_reader_reserve(reader, reader->line.len + 1) != 0) {
                     return -1;
                 }
@@ -166,6 +173,11 @@ static int read_line(struct line_reader *reader)
         }
         size_t chunk = i - start;
         if (chunk > 0) {
+            // Guard size_t wrap when extending the line buffer.
+            if (reader->line.len > SIZE_MAX - chunk - 1) {
+                errno = EOVERFLOW;
+                return -1;
+            }
             if (line_reader_reserve(reader, reader->line.len + chunk + 1) != 0) {
                 return -1;
             }
@@ -175,6 +187,11 @@ static int read_line(struct line_reader *reader)
         if (i < reader->buf_len) {
             reader->buf_pos = i + 1;
             reader->line.has_newline = true;
+            // Guard size_t wrap on extremely long lines before reserving space for NUL.
+            if (reader->line.len > SIZE_MAX - 1) {
+                errno = EOVERFLOW;
+                return -1;
+            }
             if (line_reader_reserve(reader, reader->line.len + 1) != 0) {
                 return -1;
             }

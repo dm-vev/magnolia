@@ -9,6 +9,8 @@
 #include <string.h>
 #include <unistd.h>
 
+/* BSD reference: FreeBSD paste(1). */
+
 struct line_buffer {
     char *data;
     size_t len;
@@ -150,6 +152,11 @@ static int read_line(struct line_source *source, struct line_buffer *line)
                 if (line->len == 0) {
                     return 0;
                 }
+                // Guard size_t wrap on extremely long lines before reserving space for NUL.
+                if (line->len > SIZE_MAX - 1) {
+                    errno = EOVERFLOW;
+                    return -1;
+                }
                 if (line_buffer_reserve(line, line->len + 1) != 0) {
                     return -1;
                 }
@@ -167,6 +174,11 @@ static int read_line(struct line_source *source, struct line_buffer *line)
         }
         size_t chunk = i - start;
         if (chunk > 0) {
+            // Guard size_t wrap when extending the line buffer.
+            if (line->len > SIZE_MAX - chunk - 1) {
+                errno = EOVERFLOW;
+                return -1;
+            }
             if (line_buffer_reserve(line, line->len + chunk + 1) != 0) {
                 return -1;
             }
@@ -176,6 +188,11 @@ static int read_line(struct line_source *source, struct line_buffer *line)
         if (i < source->buf_len) {
             source->buf_pos = i + 1;
             line->has_newline = true;
+            // Guard size_t wrap on extremely long lines before reserving space for NUL.
+            if (line->len > SIZE_MAX - 1) {
+                errno = EOVERFLOW;
+                return -1;
+            }
             if (line_buffer_reserve(line, line->len + 1) != 0) {
                 return -1;
             }
