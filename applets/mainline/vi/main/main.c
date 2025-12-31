@@ -21,6 +21,13 @@
  *	A true "undo" facility
  *	An "ex" line oriented mode- maybe using "cmdedit"
  */
+/*
+ * BSD reference: FreeBSD vi(1).
+ *
+ * Behavior notes:
+ * - Command and ex input lines are capped at MAX_INPUT_LEN.
+ * - This applet implements a focused vi subset; not all FreeBSD vi features exist here.
+ */
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -1324,7 +1331,11 @@ static void colon(char *buf)
     // get any ARGuments
     while (isblank(CTYPE_CAST(*buf)))
         buf++;
-    strcpy(args, buf);
+    {
+        size_t arg_len = strnlen(buf, sizeof(args) - 1);
+        memcpy(args, buf, arg_len);
+        args[arg_len] = '\0';
+    }
     useforce = FALSE;
     buf1 = last_char_is(cmd, '!');
     if (buf1) {
@@ -1351,10 +1362,18 @@ static void colon(char *buf)
     if (!args[0]) {
         if ((cmd[0] == 'w' || cmd[0] == 'W') &&
             (cmd[1] == 'q' || cmd[1] == 'Q' || cmd[1] == 'n' || cmd[1] == 'N') && cmd[2]) {
-            strcpy(args, cmd + 2);
+            {
+                size_t arg_len = strnlen(cmd + 2, sizeof(args) - 1);
+                memcpy(args, cmd + 2, arg_len);
+                args[arg_len] = '\0';
+            }
             cmd[2] = '\0';
         } else if ((cmd[0] == 'x' || cmd[0] == 'X') && cmd[1]) {
-            strcpy(args, cmd + 1);
+            {
+                size_t arg_len = strnlen(cmd + 1, sizeof(args) - 1);
+                memcpy(args, cmd + 1, arg_len);
+                args[arg_len] = '\0';
+            }
             cmd[1] = '\0';
         }
     }
@@ -3256,8 +3275,16 @@ static void show_status_line(void)
         format_edit_status(EDIT_STATUS);
     const char *changed = scompare(buffer, displayed_buffer);
     if (changed) {
+        /* Clamp copies to the status buffer to avoid UB on malformed strings. */
         size_t unchanged = changed - buffer;
-        strcpy(displayed_buffer + unchanged, changed);
+        if (unchanged >= STATUS_BUFFER_LEN - 1) {
+            displayed_buffer[STATUS_BUFFER_LEN - 1] = '\0';
+        } else {
+            size_t avail = STATUS_BUFFER_LEN - 1 - unchanged;
+            size_t changed_len = strnlen(changed, avail);
+            memcpy(displayed_buffer + unchanged, changed, changed_len);
+            displayed_buffer[unchanged + changed_len] = '\0';
+        }
         // place cursor on correct column if line begins with standout text
         size_t escapes = *buffer == *SOs ? 2 * SOlen : 0;
         place_cursor(rows - 1, // put cursor on status line
