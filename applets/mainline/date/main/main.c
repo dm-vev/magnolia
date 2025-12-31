@@ -1,12 +1,15 @@
 #include <errno.h>
 #include <getopt.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
 
+/* BSD reference: FreeBSD date(1). */
 static const char *g_version = "Magnolia coreutils 0.1";
 
 static void eprintf(const char *fmt, ...)
@@ -26,6 +29,35 @@ static void eprintf(const char *fmt, ...)
     (void)write(STDERR_FILENO, buf, len);
 }
 
+static int write_all(int fd, const void *buf, size_t len)
+{
+    const unsigned char *p = (const unsigned char *)buf;
+    size_t off = 0;
+    while (off < len) {
+        ssize_t w = write(fd, p + off, len - off);
+        if (w < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        if (w == 0) {
+            errno = EIO;
+            return -1;
+        }
+        off += (size_t)w;
+    }
+    return 0;
+}
+
+static int write_line(const char *s, size_t len)
+{
+    if (len > 0 && write_all(STDOUT_FILENO, s, len) != 0) {
+        return -1;
+    }
+    return write_all(STDOUT_FILENO, "\n", 1);
+}
+
 static bool streq(const char *a, const char *b)
 {
     return a && b && strcmp(a, b) == 0;
@@ -42,6 +74,42 @@ static void print_help(void)
 static void print_version(void)
 {
     printf("date (%s)\n", g_version);
+}
+
+static int format_time(const char *fmt, const struct tm *tm, char **out, size_t *out_len)
+{
+    size_t size = 128;
+    /* Cap growth to avoid unbounded allocations on invalid format strings. */
+    const size_t max_size = 1024 * 1024;
+    if (fmt == NULL || tm == NULL || out == NULL || out_len == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (fmt[0] == '\0') {
+        *out = NULL;
+        *out_len = 0;
+        return 0;
+    }
+
+    for (;;) {
+        char *buf = (char *)malloc(size);
+        if (buf == NULL) {
+            return -1;
+        }
+        size_t n = strftime(buf, size, fmt, tm);
+        if (n > 0) {
+            *out = buf;
+            *out_len = n;
+            return 0;
+        }
+        free(buf);
+
+        if (size >= max_size || size > SIZE_MAX / 2 || size >= (size_t)INT_MAX) {
+            errno = EOVERFLOW;
+            return -1;
+        }
+        size *= 2;
+    }
 }
 
 int main(int argc, char **argv)
@@ -87,12 +155,18 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    char out[128];
-    size_t n = strftime(out, sizeof(out), fmt, tm);
-    if (n == 0) {
+    char *out = NULL;
+    size_t out_len = 0;
+    if (format_time(fmt, tm, &out, &out_len) != 0) {
         eprintf("date: invalid format\n");
         return 1;
     }
-    printf("%s\n", out);
+
+    int rc = write_line(out ? out : "", out_len);
+    free(out);
+    if (rc != 0) {
+        eprintf("date: stdout: %s\n", strerror(errno));
+        return 1;
+    }
     return 0;
 }
