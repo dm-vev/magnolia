@@ -3305,39 +3305,62 @@ static void status_line(const char *format, ...)
 }
 
 // copy s to buf, convert unprintable
-static void print_literal(char *buf, const char *s)
+static void print_literal(char *buf, size_t buf_size, const char *s)
 {
     unsigned char c;
     char b[2];
+    size_t off = 0;
 
+    /* Clamp status rendering to the caller's buffer to avoid overflow. */
     b[1] = '\0';
+    if (buf_size == 0) {
+        return;
+    }
     buf[0] = '\0';
     if (!s[0])
         s = "(NULL)";
     for (; *s; s++) {
         int c_is_no_print;
 
+        if (off + 1 >= buf_size) {
+            break;
+        }
         c = *s;
         c_is_no_print = (c & 0x80) && !Isprint(c);
         if (c_is_no_print) {
-            strcat(buf, SOn);
+            for (const char *p = SOn; *p && off + 1 < buf_size; ++p) {
+                buf[off++] = *p;
+            }
+            buf[off] = '\0';
             c = '.';
         }
         if (c < ' ' || c == 127) {
-            strcat(buf, "^");
+            if (off + 1 < buf_size) {
+                buf[off++] = '^';
+                buf[off] = '\0';
+            }
             if (c == 127)
                 c = '?';
             else
                 c += '@';
         }
         b[0] = c;
-        strcat(buf, b);
-        if (c_is_no_print)
-            strcat(buf, SOs);
-        if (*s == '\n')
-            strcat(buf, "$");
-        if (strlen(buf) > MAX_INPUT_LEN - 10) // paranoia
-            break;
+        if (off + 1 < buf_size) {
+            buf[off++] = b[0];
+            buf[off] = '\0';
+        }
+        if (c_is_no_print) {
+            for (const char *p = SOs; *p && off + 1 < buf_size; ++p) {
+                buf[off++] = *p;
+            }
+            buf[off] = '\0';
+        }
+        if (*s == '\n') {
+            if (off + 1 < buf_size) {
+                buf[off++] = '$';
+                buf[off] = '\0';
+            }
+        }
     }
 }
 
@@ -3345,7 +3368,7 @@ static void not_implemented(const char *s)
 {
     char buf[MAX_INPUT_LEN];
 
-    print_literal(buf, s);
+    print_literal(buf, sizeof(buf), s);
     status_line_bold("\'%s\' is not implemented", buf);
 }
 

@@ -24,6 +24,7 @@
 - Updated `applets/mainline/env` to implement BSD env option parsing (-i/-u/-P/-S/-v), argument splitting for -S, environment clearing, and exec path search with robust error handling.
 - Updated Go `pwd` to match BSD/mainline behavior by validating $PWD with stat, honoring -L/-P, handling long paths, and reporting too many arguments.
 - Reworked `applets/mainline/ln` to remove GNU options, implement BSD-style option parsing, hard/symbolic link creation, overwrite prompting, and directory handling with recursive -F removal.
+- Fixed `applets/mainline/ln` directory cleanup to detect and report `readdir` errors during -F recursive removals instead of silently continuing to `rmdir`.
 - Updated `applets/mainline/paste` to parse BSD-style delimiter escapes (including `\\n`, `\\t`, `\\0`, and `\\\\`) and handle NUL delimiters safely.
 - Updated Zig `cat` to track numbering/blank-line state across files, add buffered output with -u support, and report BSD-style read/write errors.
 - Added mainline BSD applet `cksum`.
@@ -52,4 +53,5 @@
 - Fixed mainline `xxd` line assembly overflow that could OOB-write on large `-c` column counts. Cause: `snprintf` return values advanced past a 512-byte stack buffer. Fix: compute required line capacity, allocate dynamically, and append with overflow checks plus robust stdout writes.
 - Fixed mainline `comm` and `paste` line buffer growth overflow that could wrap `size_t` and under-allocate on extremely long lines, leading to OOB writes or crashes. Cause: unchecked `line->len + chunk + 1`/`line->len + 1` arithmetic before realloc. Fix: explicit overflow guards returning `EOVERFLOW`.
 - Fixed mainline `rm` directory traversal to detect `readdir` errors and report them instead of silently continuing to `rmdir`. Cause: missing `errno` check after `readdir`, which masked directory I/O failures and could emit misleading errors. Fix: capture `errno`, report via existing `rm: path: error` format, and skip `rmdir` on failure.
+- Fixed mainline `vi` status literal rendering overflow that could corrupt memory on long unprintable sequences. Cause: `print_literal` used unbounded `strcat` into a fixed `MAX_INPUT_LEN` buffer with late length checks. Fix: bounded appends with explicit buffer size tracking and truncation.
 - Fixed mainline `xxd` option parsing and skip handling to avoid `atoi` overflow UB, handle `EINTR` safely, and allow skip requests beyond EOF without spurious errors. Cause: unchecked `atoi` on `-g`/`-c`, non-retry `read`, and treating short reads during skip as hard failures. Fix: safe `strtol` parsing with fallbacks, EINTR-safe reads, and EOF-tolerant skipping for non-seekable inputs.
