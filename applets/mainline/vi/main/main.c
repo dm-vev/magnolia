@@ -1581,21 +1581,21 @@ static void colon(char *buf)
                 argp++; // skip all delimiting blanks
         }
         // display values of all options in status line
-        char *cursor = status_buffer;
-        *cursor = 0;
+        size_t used = 0;
+        status_buffer[0] = '\0';
         if (!autoindent)
-            cursor = stpcopy(cursor, "no");
-        cursor = stpcopy(cursor, "autoindent ");
+            used = status_append(status_buffer, STATUS_BUFFER_LEN, used, "no");
+        used = status_append(status_buffer, STATUS_BUFFER_LEN, used, "autoindent ");
         if (!err_method)
-            cursor = stpcopy(cursor, "no");
-        cursor = stpcopy(cursor, "flash ");
+            used = status_append(status_buffer, STATUS_BUFFER_LEN, used, "no");
+        used = status_append(status_buffer, STATUS_BUFFER_LEN, used, "flash ");
         if (!ignorecase)
-            cursor = stpcopy(cursor, "no");
-        cursor = stpcopy(cursor, "ignorecase ");
+            used = status_append(status_buffer, STATUS_BUFFER_LEN, used, "no");
+        used = status_append(status_buffer, STATUS_BUFFER_LEN, used, "ignorecase ");
         if (!showmatch)
-            cursor = stpcopy(cursor, "no");
-        cursor = stpcopy(cursor, "showmatch ");
-        cursor += printf(cursor, "tabstop=%d ", tabstop);
+            used = status_append(status_buffer, STATUS_BUFFER_LEN, used, "no");
+        used = status_append(status_buffer, STATUS_BUFFER_LEN, used, "showmatch ");
+        (void)status_appendf(status_buffer, STATUS_BUFFER_LEN, used, "tabstop=%d ", tabstop);
 #endif /* FEATURE_VI_SETOPTS */
 #endif /* FEATURE_VI_SET */
 #if ENABLE_FEATURE_VI_SEARCH
@@ -3332,6 +3332,46 @@ static void status_line(const char *format, ...)
     va_start(args, format);
     (void)vsnprintf(status_buffer, STATUS_BUFFER_LEN, format, args);
     va_end(args);
+}
+
+static size_t status_append(char *buf, size_t cap, size_t off, const char *s)
+{
+    if (cap == 0 || off >= cap || s == NULL) {
+        return off;
+    }
+    size_t avail = cap - off - 1;
+    if (avail == 0) {
+        return off;
+    }
+    size_t len = strlen(s);
+    if (len > avail) {
+        len = avail;
+    }
+    if (len > 0) {
+        memcpy(buf + off, s, len);
+        off += len;
+    }
+    buf[off] = '\0';
+    return off;
+}
+
+static size_t status_appendf(char *buf, size_t cap, size_t off, const char *fmt, ...)
+{
+    if (cap == 0 || off >= cap || fmt == NULL) {
+        return off;
+    }
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(buf + off, cap - off, fmt, args);
+    va_end(args);
+    if (n <= 0) {
+        return off;
+    }
+    size_t wrote = (size_t)n;
+    if (wrote >= cap - off) {
+        return cap - 1;
+    }
+    return off + wrote;
 }
 
 // copy s to buf, convert unprintable
