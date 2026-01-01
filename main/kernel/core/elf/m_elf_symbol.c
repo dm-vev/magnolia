@@ -19,6 +19,8 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <sys/times.h>
+#include <sys/wait.h>
+#include <signal.h>
 #include <ctype.h>
 #include <setjmp.h>
 #include <math.h>
@@ -123,6 +125,10 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     { "dup", (void *)m_libc_dup },
     { "dup2", (void *)m_libc_dup2 },
     { "ftruncate", (void *)m_libc_ftruncate },
+    { "creat", (void *)creat },
+    { "fcntl", (void *)fcntl },
+    { "umask", (void *)m_libc_umask },
+    { "pipe", (void *)m_libc_pipe },
     { "poll", (void *)m_libc_poll },
     { "select", (void *)m_libc_select },
     { "unlink", (void *)m_libc_unlink },
@@ -139,14 +145,18 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     { "isatty", (void *)m_libc_isatty },
     { "access", (void *)m_libc_access },
     { "remove", (void *)m_libc_remove },
+    { "link", (void *)link },
 
     /* Time (monotonic-backed) */
     { "clock_gettime", (void *)m_libc_clock_gettime },
     { "gettimeofday", (void *)m_libc_gettimeofday },
     { "time", (void *)m_libc_time },
+    { "times", (void *)times },
     { "sleep", (void *)m_libc_sleep },
     { "usleep", (void *)m_libc_usleep },
     { "nanosleep", (void *)m_libc_nanosleep },
+    { "alarm", (void *)m_libc_alarm },
+    { "pause", (void *)m_libc_pause },
 
     /* Identity (job-mapped) */
     { "getpid", (void *)m_libc_getpid },
@@ -155,6 +165,10 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     { "getgid", (void *)m_libc_getgid },
     { "geteuid", (void *)m_libc_geteuid },
     { "getegid", (void *)m_libc_getegid },
+    { "fork", (void *)m_libc_fork },
+    { "wait", (void *)m_libc_wait },
+    { "signal", (void *)m_libc_signal },
+    { "sbrk", (void *)m_libc_sbrk },
 
     /* Memory/string primitives */
     M_ELFSYM_EXPORT(memset),

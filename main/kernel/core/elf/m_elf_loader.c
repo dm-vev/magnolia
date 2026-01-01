@@ -7,6 +7,8 @@
 #include <sys/errno.h>
 #include <setjmp.h>
 #include <stdint.h>
+#include <limits.h>
+#include <unistd.h>
 
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -31,7 +33,65 @@
 #define sflags(_s, _f)              (((_s)->flags & (_f)) == (_f))
 #define ADDR_OFFSET                 (0x400)
 
+extern char **environ;
+extern char *optarg;
+extern int optind;
+extern int opterr;
+extern int optopt;
 static const char *TAG = "m_elf";
+static char s_term_env[] = "TERM=vt100";
+static char *s_default_environ[] = { s_term_env, NULL };
+
+static char **m_elf_clone_argv(job_ctx_t *ctx, int argc, char *argv[], void **out_block)
+{
+    if (out_block) {
+        *out_block = NULL;
+    }
+    if (argc <= 0 || argv == NULL) {
+        return argv;
+    }
+
+    size_t ptr_bytes = (size_t)(argc + 1) * sizeof(char *);
+    if (ptr_bytes < sizeof(char *)) {
+        return argv;
+    }
+
+    size_t total_len = 0;
+    for (int i = 0; i < argc; ++i) {
+        const char *arg = argv[i] ? argv[i] : "";
+        size_t len = strlen(arg) + 1;
+        if (len == 0 || total_len > SIZE_MAX - len) {
+            return argv;
+        }
+        total_len += len;
+    }
+
+    if (total_len > SIZE_MAX - ptr_bytes) {
+        return argv;
+    }
+
+    size_t total = ptr_bytes + total_len;
+    void *block = m_job_alloc(ctx, total);
+    if (block == NULL) {
+        return argv;
+    }
+
+    char **dstv = (char **)block;
+    char *dst = (char *)block + ptr_bytes;
+    for (int i = 0; i < argc; ++i) {
+        const char *arg = argv[i] ? argv[i] : "";
+        size_t len = strlen(arg) + 1;
+        memcpy(dst, arg, len);
+        dstv[i] = dst;
+        dst += len;
+    }
+    dstv[argc] = NULL;
+
+    if (out_block) {
+        *out_block = block;
+    }
+    return dstv;
+}
 
 static bool m_elf_path_is_safe(const char *path)
 {
@@ -608,11 +668,25 @@ int m_elf_relocate(m_elf_t *elf, const uint8_t *pbuf, size_t len)
             }
         }
     } else {
+#if defined(__riscv)
+        /*
+         * RISC-V PIC uses PC-relative addressing across text/GOT, so keep the
+         * load layout contiguous to preserve vaddr offsets.
+         */
+        ret = m_elf_load_segment(elf, pbuf);
+        if (ret != 0) {
+            ret = m_elf_load_phdr_image(elf, pbuf, len);
+            if (ret == -ENOTSUP) {
+                ret = m_elf_load_segment(elf, pbuf);
+            }
+        }
+#else
         /* Prefer program-header based loading (covers GOT/init_array/etc). */
         ret = m_elf_load_phdr_image(elf, pbuf, len);
         if (ret == -ENOTSUP) {
             ret = m_elf_load_segment(elf, pbuf);
         }
+#endif
     }
     if (ret) {
         ESP_LOGE(TAG, "Error to load ELF, ret=%d", ret);
@@ -749,13 +823,32 @@ int m_elf_request(m_elf_t *elf, int opt, int argc, char *argv[])
         return -ECANCELED;
     }
 
+    job_ctx_t *prev_ctx = jctx_current();
+    if (elf->ctx != NULL && prev_ctx != elf->ctx) {
+        jctx_set_current(elf->ctx);
+    }
+
     m_libc_exit_frame_t *exit_frame =
             (m_libc_exit_frame_t *)m_job_alloc(elf->ctx, sizeof(*exit_frame));
     if (exit_frame == NULL) {
+        if (elf->ctx != NULL && prev_ctx != elf->ctx) {
+            jctx_set_current(prev_ctx);
+        }
         return -ENOMEM;
     }
     memset(exit_frame, 0, sizeof(*exit_frame));
     m_libc_exit_frame_push(exit_frame);
+
+    void *argv_block = NULL;
+    char **argv_copy = m_elf_clone_argv(elf->ctx, argc, argv, &argv_block);
+
+    char **prev_environ = environ;
+    environ = s_default_environ;
+
+    optind = 1;
+    opterr = 1;
+    optopt = 0;
+    optarg = NULL;
 
     int rc = 0;
     if (setjmp(exit_frame->env) == 0) {
@@ -775,7 +868,7 @@ int m_elf_request(m_elf_t *elf, int opt, int argc, char *argv[])
                 }
             }
         }
-        rc = elf->entry(argc, argv);
+        rc = elf->entry(argc, argv_copy);
     } else {
         rc = exit_frame->code;
     }
@@ -789,8 +882,17 @@ int m_elf_request(m_elf_t *elf, int opt, int argc, char *argv[])
         }
     }
 
+    if (argv_block != NULL) {
+        m_job_free(elf->ctx, argv_block);
+    }
+
+    environ = prev_environ;
+
     m_libc_exit_frame_pop(exit_frame);
     m_job_free(elf->ctx, exit_frame);
+    if (elf->ctx != NULL && prev_ctx != elf->ctx) {
+        jctx_set_current(prev_ctx);
+    }
     ESP_LOGI(TAG, "ELF finished, rc=%d", rc);
     m_elf_log_stack_watermark("after");
     m_elf_log_job_heap("after", elf->ctx);

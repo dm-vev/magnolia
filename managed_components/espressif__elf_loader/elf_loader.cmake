@@ -15,13 +15,16 @@ macro(project_elf project_name)
     # Enable these options to remove unused symbols and reduce linked objects
     set(cflags -nostartfiles
                -nostdlib
-               -fPIC
                -shared
                -e app_main
                -fdata-sections
                -ffunction-sections
                -Wl,--gc-sections
                -fvisibility=hidden)
+
+    if(IDF_TARGET STREQUAL "linux" OR CONFIG_IDF_TARGET_ARCH_RISCV)
+        list(APPEND cflags -fPIC)
+    endif()
 
     # Enable this options to remove unnecessary sections in
     list(APPEND cflags -Wl,--strip-all

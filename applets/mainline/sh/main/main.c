@@ -59,8 +59,7 @@ static ssize_t console_getline(char *buf, size_t cap)
 
 static bool is_shell_space(unsigned char c)
 {
-    return c == ' ' || c == 0xA0 || c == '\t' || c == '\n' || c == '\r' || c == '\v'
-           || c == '\f';
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f';
 }
 
 static int split_args(char *line, char **argv, int cap)

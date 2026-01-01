@@ -64,6 +64,9 @@
 #include <termios.h>
 #endif
 
+static size_t status_append(char *buf, size_t cap, size_t off, const char *s);
+static size_t status_appendf(char *buf, size_t cap, size_t off, const char *fmt, ...);
+
 #define BB_VER "version 2.62"
 #define BB_BT "brent@mbari.org"
 

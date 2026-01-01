@@ -122,6 +122,15 @@ time_t m_libc_time(time_t *tloc);
 unsigned int m_libc_sleep(unsigned int seconds);
 int m_libc_usleep(unsigned int usec);
 int m_libc_nanosleep(const void *req, void *rem);
+int m_libc_umask(mode_t mask);
+unsigned int m_libc_alarm(unsigned int seconds);
+int m_libc_pause(void);
+typedef void (*m_libc_sighandler_t)(int);
+m_libc_sighandler_t m_libc_signal(int signum, m_libc_sighandler_t handler);
+int m_libc_pipe(int fds[2]);
+int m_libc_fork(void);
+int m_libc_wait(int *status);
+void *m_libc_sbrk(ptrdiff_t incr);
 
 #if defined(CONFIG_MAGNOLIA_ELF_EXPORT_NEWLIB) && CONFIG_MAGNOLIA_ELF_EXPORT_NEWLIB
 void *m_libc_malloc_r(struct _reent *r, size_t size);

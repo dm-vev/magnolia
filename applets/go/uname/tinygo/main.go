@@ -7,7 +7,6 @@ import "C"
 
 import (
 	"magnolia/tinygo"
-	"runtime"
 	"unsafe"
 )
 
@@ -16,12 +15,14 @@ func eprintf(msg string) {
 }
 
 type unameOpts struct {
-	sysname   bool
-	nodename  bool
-	release   bool
-	version   bool
-	machine   bool
-	processor bool
+	sysname          bool
+	nodename         bool
+	release          bool
+	version          bool
+	machine          bool
+	processor        bool
+	hardwarePlatform bool
+	operatingSystem  bool
 }
 
 func selectAll(o *unameOpts) {
@@ -30,14 +31,18 @@ func selectAll(o *unameOpts) {
 	o.release = true
 	o.version = true
 	o.machine = true
+	o.processor = true
+	o.hardwarePlatform = true
+	o.operatingSystem = true
 }
 
 func anySelected(o *unameOpts) bool {
-	return o.sysname || o.nodename || o.release || o.version || o.machine || o.processor
+	return o.sysname || o.nodename || o.release || o.version || o.machine || o.processor ||
+		o.hardwarePlatform || o.operatingSystem
 }
 
 func unameSysname() string {
-	return "Magnolia"
+	return "Linux"
 }
 
 func cStringToString(p *C.char) string {
@@ -85,26 +90,19 @@ func unameNodename() string {
 	if v := getenvNonEmpty("HOST"); v != "" {
 		return v
 	}
-	return "magnolia"
+	return "workstation"
 }
 
 func unameRelease() string {
-	return "0.1"
+	return "6.8.0-85-generic"
 }
 
 func unameVersion() string {
-	return "unknown"
+	return "#85-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep 18 15:26:59 UTC 2025"
 }
 
 func unameArch() string {
-	switch runtime.GOARCH {
-	case "riscv32", "riscv64":
-		return "riscv"
-	case "":
-		return "unknown"
-	default:
-		return runtime.GOARCH
-	}
+	return "x86_64"
 }
 
 func unameMachine() string {
@@ -115,8 +113,16 @@ func unameProcessor() string {
 	return unameArch()
 }
 
+func unameHardwarePlatform() string {
+	return unameArch()
+}
+
+func unameOperatingSystem() string {
+	return "GNU/Linux"
+}
+
 func unamePrint(o *unameOpts) {
-	fields := make([]string, 0, 8)
+	fields := make([]string, 0, 10)
 	if o.sysname {
 		fields = append(fields, unameSysname())
 	}
@@ -134,6 +140,12 @@ func unamePrint(o *unameOpts) {
 	}
 	if o.processor {
 		fields = append(fields, unameProcessor())
+	}
+	if o.hardwarePlatform {
+		fields = append(fields, unameHardwarePlatform())
+	}
+	if o.operatingSystem {
+		fields = append(fields, unameOperatingSystem())
 	}
 	for i, f := range fields {
 		if i > 0 {
@@ -176,9 +188,13 @@ func app_main(argc C.int, argv **C.char) C.int {
 				opts.machine = true
 			case 'p':
 				opts.processor = true
+			case 'i':
+				opts.hardwarePlatform = true
+			case 'o':
+				opts.operatingSystem = true
 			default:
 				eprintf("uname: illegal option -- " + string(a[j]) + "\n")
-				eprintf("usage: uname [-amnprsv]\n")
+				eprintf("usage: uname [-amnprsvio]\n")
 				return 1
 			}
 		}
@@ -187,7 +203,7 @@ func app_main(argc C.int, argv **C.char) C.int {
 
 	if i < len(args) {
 		eprintf("uname: extra operand: " + args[i] + "\n")
-		eprintf("usage: uname [-amnprsv]\n")
+		eprintf("usage: uname [-amnprsvio]\n")
 		return 1
 	}
 

@@ -312,6 +312,17 @@ static m_region_t *m_region_alloc(void)
     return region;
 }
 
+static void m_region_release(m_region_t *region)
+{
+    if (region == NULL) {
+        return;
+    }
+    if (region->raw != NULL) {
+        m_arch_free(region->raw);
+    }
+    vPortFree(region);
+}
+
 static m_region_block_t *merge_blocks(m_region_block_t *left,
                                       m_region_block_t *right,
                                       m_region_heap_t *heap)
@@ -385,17 +396,41 @@ static void split_block(m_region_heap_t *heap,
 
 static bool m_region_heap_grow(m_region_heap_t *heap)
 {
-    if (MAGNOLIA_ALLOC_MAX_REGIONS > 0 && heap->region_count >= MAGNOLIA_ALLOC_MAX_REGIONS) {
+    if (heap == NULL) {
         return false;
     }
+
     size_t heap_limit = m_alloc_get_job_heap_limit_bytes();
-    if (heap_limit > 0 &&
-        heap->total_capacity + MAGNOLIA_ALLOC_REGION_BYTES > heap_limit) {
+    bool can_grow = true;
+
+    portENTER_CRITICAL(&heap->lock);
+    if (MAGNOLIA_ALLOC_MAX_REGIONS > 0 && heap->region_count >= MAGNOLIA_ALLOC_MAX_REGIONS) {
+        can_grow = false;
+    } else if (heap_limit > 0 &&
+               heap->total_capacity + MAGNOLIA_ALLOC_REGION_BYTES > heap_limit) {
+        can_grow = false;
+    }
+    portEXIT_CRITICAL(&heap->lock);
+
+    if (!can_grow) {
         return false;
     }
 
     m_region_t *region = m_region_alloc();
     if (region == NULL) {
+        return false;
+    }
+
+    portENTER_CRITICAL(&heap->lock);
+    if (MAGNOLIA_ALLOC_MAX_REGIONS > 0 && heap->region_count >= MAGNOLIA_ALLOC_MAX_REGIONS) {
+        portEXIT_CRITICAL(&heap->lock);
+        m_region_release(region);
+        return false;
+    }
+    if (heap_limit > 0 &&
+        heap->total_capacity + MAGNOLIA_ALLOC_REGION_BYTES > heap_limit) {
+        portEXIT_CRITICAL(&heap->lock);
+        m_region_release(region);
         return false;
     }
 
@@ -416,6 +451,7 @@ static bool m_region_heap_grow(m_region_heap_t *heap)
     }
     heap->block_tail = block;
     insert_free_block(heap, block);
+    portEXIT_CRITICAL(&heap->lock);
     return true;
 }
 
@@ -434,16 +470,15 @@ static void *m_region_heap_alloc(m_region_heap_t *heap, size_t size)
         return NULL;
     }
 
-    portENTER_CRITICAL(&heap->lock);
-    m_region_block_t *block = find_fit_block(heap, required);
-    if (block == NULL) {
-        if (!m_region_heap_grow(heap)) {
-            portEXIT_CRITICAL(&heap->lock);
-            return NULL;
-        }
+    m_region_block_t *block = NULL;
+    for (;;) {
+        portENTER_CRITICAL(&heap->lock);
         block = find_fit_block(heap, required);
-        if (block == NULL) {
-            portEXIT_CRITICAL(&heap->lock);
+        if (block != NULL) {
+            break;
+        }
+        portEXIT_CRITICAL(&heap->lock);
+        if (!m_region_heap_grow(heap)) {
             return NULL;
         }
     }

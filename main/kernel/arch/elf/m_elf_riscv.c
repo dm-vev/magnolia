@@ -12,8 +12,10 @@
 
 #define R_RISCV_NONE           0
 #define R_RISCV_32             1
+#define R_RISCV_GLOB_DAT       4
 #define R_RISCV_RELATIVE       3
 #define R_RISCV_JUMP_SLOT      5
+#define STT_FUNC               2
 
 static const char *TAG = "m_elf_arch";
 
@@ -41,8 +43,17 @@ int m_elf_arch_relocate(struct m_elf *elf, const elf32_rela_t *rela,
     case R_RISCV_RELATIVE:
         *where = (Elf32_Addr)(((m_elf_t *)elf)->load_bias + (uintptr_t)(intptr_t)rela->addend);
         break;
+    case R_RISCV_GLOB_DAT:
     case R_RISCV_JUMP_SLOT:
+#ifdef CONFIG_ELF_LOADER_CACHE_OFFSET
+        if (sym != NULL && ELF32_ST_TYPE(sym->info) == STT_FUNC) {
+            *where = m_elf_remap_text((m_elf_t *)elf, addr);
+        } else {
+            *where = addr;
+        }
+#else
         *where = addr;
+#endif
         break;
     default:
         ESP_LOGE(TAG, "reloc %d not supported", ELF_R_TYPE(rela->info));

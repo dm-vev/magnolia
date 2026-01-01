@@ -13,13 +13,18 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/times.h>
+#include <signal.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "esp_log.h"
 #include "esp_rom_sys.h"
 #include "esp_rom_serial_output.h"
+#include "esp_system_console.h"
 #include "driver/usb_serial_jtag.h"
+#include "esp_memory_utils.h"
+#include "soc/soc.h"
+#include "esp_heap_caps.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -44,6 +49,26 @@
 #define LIBC_ERRNO_TLS_SLOT 0u
 #define LIBC_EXIT_TLS_SLOT  1u
 #define LIBC_ATEXIT_TLS_SLOT 2u
+#define LIBC_SBRK_TLS_SLOT 3u
+#define M_LIBC_SBRK_HEAP_SIZE (128u * 1024u)
+
+typedef struct {
+    uint8_t *base;
+    ptrdiff_t brk;
+    size_t size;
+} m_libc_sbrk_state_t;
+
+static void m_libc_sbrk_state_destroy(void *value)
+{
+    m_libc_sbrk_state_t *state = (m_libc_sbrk_state_t *)value;
+    if (state == NULL) {
+        return;
+    }
+    if (state->base != NULL) {
+        m_arch_free(state->base);
+        state->base = NULL;
+    }
+}
 
 static int s_fallback_errno;
 
@@ -66,6 +91,47 @@ static int *libc_errno_ptr(void)
     *value = 0;
     (void)jctx_tls_set(ctx, LIBC_ERRNO_TLS_SLOT, value, NULL);
     return value;
+}
+
+static bool libc_ptr_in_range(const void *ptr, size_t size, uintptr_t low, uintptr_t high)
+{
+    if (ptr == NULL || size == 0) {
+        return false;
+    }
+    uintptr_t start = (uintptr_t)ptr;
+    uintptr_t end = 0;
+    if (__builtin_add_overflow(start, size - 1u, &end)) {
+        return false;
+    }
+    return start >= low && end < high;
+}
+
+static bool libc_ptr_writable_range(const void *ptr, size_t size)
+{
+    return libc_ptr_in_range(ptr, size, SOC_DRAM_LOW, SOC_DRAM_HIGH) ||
+           libc_ptr_in_range(ptr, size, SOC_EXTRAM_LOW, SOC_EXTRAM_HIGH);
+}
+
+static bool libc_ptr_readable_range(const void *ptr, size_t size)
+{
+    return libc_ptr_writable_range(ptr, size) ||
+           libc_ptr_in_range(ptr, size, SOC_DROM_LOW, SOC_DROM_HIGH);
+}
+
+static bool libc_ptr_writable(const void *ptr)
+{
+    return libc_ptr_writable_range(ptr, 1);
+}
+
+static bool libc_ptr_readable(const void *ptr)
+{
+    return libc_ptr_readable_range(ptr, 1);
+}
+
+static bool libc_console_allow_byte(uint8_t c)
+{
+    (void)c;
+    return true;
 }
 
 int *m_libc___errno(void)
@@ -445,9 +511,12 @@ static ssize_t libc_console_write(const void *buffer, size_t size)
 
     const uint8_t *bytes = (const uint8_t *)buffer;
     for (size_t i = 0; i < size; ++i) {
-        esp_rom_output_putc((char)bytes[i]);
+        char c = (char)bytes[i];
+        if (c == '\n') {
+            esp_system_console_put_char('\r');
+        }
+        esp_system_console_put_char(c);
     }
-    esp_rom_output_flush_tx(CONFIG_ESP_CONSOLE_ROM_SERIAL_PORT_NUM);
     return (ssize_t)size;
 }
 
@@ -552,25 +621,32 @@ ssize_t m_libc_read(int fd, void *buffer, size_t size)
                 if (n <= 0) {
                     continue;
                 }
+                size_t kept = 0;
                 for (int i = 0; i < n; ++i) {
-                    if (out[i] == '\r') {
-                        out[i] = '\n';
+                    uint8_t c = out[i];
+                    if (c == '\r') {
+                        c = '\n';
                     }
+                    if (!libc_console_allow_byte(c)) {
+                        continue;
+                    }
+                    out[kept++] = c;
                 }
-                produced = (size_t)n;
+                produced = kept;
             }
             return (ssize_t)produced;
         }
 #endif
 
         uint8_t c = 0;
-        while (esp_rom_output_rx_one_char(&c) != 0) {
-            vTaskDelay(1);
-        }
-
-        if (c == '\r') {
-            c = '\n';
-        }
+        do {
+            while (esp_rom_output_rx_one_char(&c) != 0) {
+                vTaskDelay(1);
+            }
+            if (c == '\r') {
+                c = '\n';
+            }
+        } while (!libc_console_allow_byte(c));
         out[produced++] = c;
 
         while (produced < size) {
@@ -579,6 +655,9 @@ ssize_t m_libc_read(int fd, void *buffer, size_t size)
             }
             if (c == '\r') {
                 c = '\n';
+            }
+            if (!libc_console_allow_byte(c)) {
+                continue;
             }
             out[produced++] = c;
         }
@@ -1685,11 +1764,11 @@ int m_libc_rename(const char *old, const char *newpath)
     return 0;
 }
 
-static void libc_fill_posix_stat(const m_vfs_stat_t *in, struct stat *out)
+static void libc_fill_posix_stat_local(m_vfs_stat_t st, struct stat *out)
 {
     memset(out, 0, sizeof(*out));
-    mode_t mode = (mode_t)in->mode;
-    switch (in->type) {
+    mode_t mode = (mode_t)st.mode;
+    switch (st.type) {
     case M_VFS_NODE_TYPE_DIRECTORY:
         mode |= S_IFDIR;
         break;
@@ -1703,8 +1782,23 @@ static void libc_fill_posix_stat(const m_vfs_stat_t *in, struct stat *out)
         break;
     }
     out->st_mode = mode;
-    out->st_size = (off_t)in->size;
-    out->st_mtime = (time_t)(in->mtime / 1000000u);
+    out->st_size = (off_t)st.size;
+    out->st_mtime = (time_t)(st.mtime / 1000000u);
+}
+
+typedef struct {
+    char normalized[M_VFS_PATH_MAX_LEN];
+    m_vfs_path_t parsed;
+} m_libc_stat_ctx_t;
+
+static m_libc_stat_ctx_t *libc_stat_ctx_alloc(void)
+{
+    return (m_libc_stat_ctx_t *)m_libc_malloc(sizeof(m_libc_stat_ctx_t));
+}
+
+static void libc_stat_ctx_free(m_libc_stat_ctx_t *ctx)
+{
+    m_libc_free(ctx);
 }
 
 int m_libc_stat(const char *path, void *out_stat)
@@ -1713,41 +1807,74 @@ int m_libc_stat(const char *path, void *out_stat)
         libc_set_errno(EINVAL);
         return -1;
     }
+    if (!libc_ptr_readable_range(path, 1)) {
+        libc_set_errno(EFAULT);
+        return -1;
+    }
+    if (!libc_ptr_writable_range(out_stat, sizeof(struct stat))) {
+        libc_set_errno(EFAULT);
+        return -1;
+    }
+    __asm__ __volatile__("" ::: "memory");
 
-    char normalized[M_VFS_PATH_MAX_LEN] = {0};
-    if (!libc_build_absolute_path(path, normalized, sizeof(normalized))) {
-        libc_set_errno(EINVAL);
+    m_libc_stat_ctx_t *ctx = libc_stat_ctx_alloc();
+    if (ctx == NULL) {
+        libc_set_errno(ENOMEM);
         return -1;
     }
 
-    m_vfs_path_t parsed;
-    if (!m_vfs_path_parse(normalized, &parsed)) {
+    if (!libc_build_absolute_path(path, ctx->normalized, sizeof(ctx->normalized))) {
         libc_set_errno(EINVAL);
+        libc_stat_ctx_free(ctx);
+        return -1;
+    }
+
+    if (!m_vfs_path_parse(ctx->normalized, &ctx->parsed)) {
+        libc_set_errno(EINVAL);
+        libc_stat_ctx_free(ctx);
         return -1;
     }
 
     m_vfs_node_t *node = NULL;
-    m_vfs_error_t err = m_vfs_path_resolve(libc_job_id(), &parsed, &node);
+    m_vfs_error_t err = m_vfs_path_resolve(libc_job_id(), &ctx->parsed, &node);
     if (err != M_VFS_ERR_OK || node == NULL) {
         libc_set_errno(libc_errno_from_vfs_error(err));
+        libc_stat_ctx_free(ctx);
         return -1;
     }
 
-    if (node->fs_type == NULL || node->fs_type->ops == NULL || node->fs_type->ops->getattr == NULL) {
+    if (!libc_ptr_writable_range(node, sizeof(*node))) {
+        libc_set_errno(EFAULT);
+        libc_stat_ctx_free(ctx);
+        return -1;
+    }
+
+    const m_vfs_fs_type_t *fs_type = node->fs_type;
+    if (fs_type == NULL || !libc_ptr_readable_range(fs_type, sizeof(*fs_type))) {
         m_vfs_node_release(node);
+        libc_stat_ctx_free(ctx);
+        libc_set_errno(EFAULT);
+        return -1;
+    }
+
+    const struct m_vfs_fs_ops *ops = fs_type->ops;
+    if (ops == NULL || !libc_ptr_readable_range(ops, sizeof(*ops)) || ops->getattr == NULL) {
+        m_vfs_node_release(node);
+        libc_stat_ctx_free(ctx);
         libc_set_errno(ENOTSUP);
         return -1;
     }
 
     m_vfs_stat_t st = {0};
-    err = node->fs_type->ops->getattr(node, &st);
+    err = ops->getattr(node, &st);
     m_vfs_node_release(node);
+    libc_stat_ctx_free(ctx);
     if (err != M_VFS_ERR_OK) {
         libc_set_errno(libc_errno_from_vfs_error(err));
         return -1;
     }
 
-    libc_fill_posix_stat(&st, (struct stat *)out_stat);
+    libc_fill_posix_stat_local(st, (struct stat *)out_stat);
     return 0;
 }
 
@@ -1757,6 +1884,11 @@ int m_libc_fstat(int fd, void *out_stat)
         libc_set_errno(EINVAL);
         return -1;
     }
+    if (!libc_ptr_writable_range(out_stat, sizeof(struct stat))) {
+        libc_set_errno(EFAULT);
+        return -1;
+    }
+    __asm__ __volatile__("" ::: "memory");
 
     if (fd >= 0 && fd <= 2) {
         libc_set_errno(ENOTSUP);
@@ -1775,7 +1907,7 @@ int m_libc_fstat(int fd, void *out_stat)
         return -1;
     }
 
-    libc_fill_posix_stat(&st, (struct stat *)out_stat);
+    libc_fill_posix_stat_local(st, (struct stat *)out_stat);
     return 0;
 }
 
@@ -2000,6 +2132,105 @@ int m_libc_nanosleep(const void *req, void *rem)
         vTaskDelay(m_timer_delta_to_ticks(us));
     }
     return 0;
+}
+
+int m_libc_umask(mode_t mask)
+{
+    (void)mask;
+    return 0;
+}
+
+unsigned int m_libc_alarm(unsigned int seconds)
+{
+    (void)seconds;
+    return 0;
+}
+
+int m_libc_pause(void)
+{
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
+m_libc_sighandler_t m_libc_signal(int signum, m_libc_sighandler_t handler)
+{
+    (void)signum;
+    (void)handler;
+    libc_set_errno(ENOSYS);
+    return SIG_ERR;
+}
+
+int m_libc_pipe(int fds[2])
+{
+    (void)fds;
+    libc_set_errno(ENOTSUP);
+    return -1;
+}
+
+int m_libc_fork(void)
+{
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
+int m_libc_wait(int *status)
+{
+    if (status) {
+        *status = -1;
+    }
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
+void *m_libc_sbrk(ptrdiff_t incr)
+{
+    job_ctx_t *ctx = jctx_current();
+    if (ctx == NULL) {
+        libc_set_errno(ENOSYS);
+        return (void *)-1;
+    }
+
+    m_libc_sbrk_state_t *state =
+            (m_libc_sbrk_state_t *)jctx_tls_get(ctx, LIBC_SBRK_TLS_SLOT);
+    if (state == NULL) {
+        state = (m_libc_sbrk_state_t *)m_job_alloc(ctx, sizeof(*state));
+        if (state == NULL) {
+            libc_set_errno(ENOMEM);
+            return (void *)-1;
+        }
+        state->base = (uint8_t *)heap_caps_malloc(M_LIBC_SBRK_HEAP_SIZE,
+                                                  MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (state->base == NULL) {
+            libc_set_errno(ENOMEM);
+            return (void *)-1;
+        }
+        state->brk = 0;
+        state->size = M_LIBC_SBRK_HEAP_SIZE;
+        (void)jctx_tls_set(ctx, LIBC_SBRK_TLS_SLOT, state, m_libc_sbrk_state_destroy);
+    }
+
+    if (incr == 0) {
+        return state->base + state->brk;
+    }
+
+    if (incr < 0) {
+        if (state->brk + incr < 0) {
+            libc_set_errno(ENOMEM);
+            return (void *)-1;
+        }
+        void *old = state->base + state->brk;
+        state->brk += incr;
+        return old;
+    }
+
+    if ((size_t)state->brk + (size_t)incr > state->size) {
+        libc_set_errno(ENOMEM);
+        return (void *)-1;
+    }
+
+    void *old = state->base + state->brk;
+    state->brk += incr;
+    return old;
 }
 
 static inline void libc_reent_set_errno(struct _reent *r, int value)

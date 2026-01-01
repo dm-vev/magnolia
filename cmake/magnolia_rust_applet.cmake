@@ -11,7 +11,21 @@
 # - MAGNOLIA_ESPUP_EXPORT: Path to espup-generated export script; empty to skip sourcing it
 
 set(MAGNOLIA_RUST_TOOLCHAIN "esp" CACHE STRING "Rust toolchain name to use (as in `cargo +<toolchain>`); set empty to use default")
-set(MAGNOLIA_RUST_TARGET "xtensa-esp32s3-none-elf" CACHE STRING "Rust target triple")
+
+if(NOT DEFINED MAGNOLIA_RUST_TARGET)
+    set(_MAGNOLIA_RUST_TARGET_DEFAULT "xtensa-esp32s3-none-elf")
+    if(DEFINED IDF_TARGET)
+        if(IDF_TARGET STREQUAL "esp32c3")
+            set(_MAGNOLIA_RUST_TARGET_DEFAULT "riscv32imc-esp-espidf")
+        elseif(IDF_TARGET STREQUAL "esp32c6" OR IDF_TARGET STREQUAL "esp32h2")
+            set(_MAGNOLIA_RUST_TARGET_DEFAULT "riscv32imac-esp-espidf")
+        elseif(IDF_TARGET STREQUAL "esp32p4")
+            set(_MAGNOLIA_RUST_TARGET_DEFAULT "riscv32imafc-esp-espidf")
+        endif()
+    endif()
+    set(MAGNOLIA_RUST_TARGET "${_MAGNOLIA_RUST_TARGET_DEFAULT}" CACHE STRING "Rust target triple")
+endif()
+
 set(MAGNOLIA_ESPUP_EXPORT "$ENV{HOME}/export-esp.sh" CACHE STRING "Path to espup-generated export script; set empty to skip sourcing it")
 
 get_filename_component(_MAGNOLIA_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)

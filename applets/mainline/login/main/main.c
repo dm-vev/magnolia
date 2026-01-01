@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <ctype.h>
 
 int m_elf_run_file(const char *path, int argc, char *argv[], int *out_rc);
 
@@ -43,6 +44,10 @@ static ssize_t console_getline(char *buf, size_t cap)
             continue;
         }
 
+        if ((unsigned char)c < 0x20 || (unsigned char)c > 0x7e) {
+            continue;
+        }
+
         if (len + 1 < cap) {
             buf[len++] = c;
             (void)write(1, &c, 1);
@@ -51,6 +56,22 @@ static ssize_t console_getline(char *buf, size_t cap)
 
     buf[len] = '\0';
     return (ssize_t)len;
+}
+
+static void sanitize_user(char *buf)
+{
+    if (buf == NULL) {
+        return;
+    }
+
+    size_t out = 0;
+    for (size_t i = 0; buf[i] != '\0'; ++i) {
+        unsigned char c = (unsigned char)buf[i];
+        if (isalnum(c)) {
+            buf[out++] = (char)c;
+        }
+    }
+    buf[out] = '\0';
 }
 
 int main(int argc, char **argv)
@@ -70,11 +91,25 @@ int main(int argc, char **argv)
             continue;
         }
 
+        sanitize_user(user);
+
+        bool blank = true;
+        for (size_t i = 0; user[i] != '\0'; ++i) {
+            if (!isspace((unsigned char)user[i])) {
+                blank = false;
+                break;
+            }
+        }
+        if (blank) {
+            continue;
+        }
+
         if (strcmp(user, "root") != 0) {
             console_puts("login incorrect\n");
             continue;
         }
 
+        console_puts("login: starting /bin/sh\n");
         int rc = 0;
         int ret = m_elf_run_file(sh_path, 1, sh_argv, &rc);
         if (ret != 0) {
@@ -82,6 +117,7 @@ int main(int argc, char **argv)
             sleep(1);
             continue;
         }
+        printf("login: /bin/sh exited rc=%d\n", rc);
         (void)rc;
     }
 }

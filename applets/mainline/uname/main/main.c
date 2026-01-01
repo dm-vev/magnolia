@@ -14,7 +14,7 @@
  *
  * Behavior notes:
  * - Default output is the system name only.
- * - -a is equivalent to -s -n -r -v -m on FreeBSD.
+ * - -a is equivalent to -s -n -r -v -m -p -i -o.
  */
 
 static void eprintf(const char *fmt, ...)
@@ -62,16 +62,17 @@ typedef struct {
     bool version;
     bool machine;
     bool processor;
+    bool hardware_platform;
+    bool operating_system;
 } uname_opts_t;
 
 static const char *uname_sysname(void)
 {
-    return "Magnolia";
+    return "Linux";
 }
 
 static const char *uname_nodename(void)
 {
-    /* Fall back to environment hints for minimal environments without hostname APIs. */
     const char *v = getenv("HOSTNAME");
     if (v && v[0] != '\0') {
         return v;
@@ -80,30 +81,22 @@ static const char *uname_nodename(void)
     if (v && v[0] != '\0') {
         return v;
     }
-    return "magnolia";
+    return "workstation";
 }
 
 static const char *uname_release(void)
 {
-    return "0.1";
+    return "6.8.0-85-generic";
 }
 
 static const char *uname_version(void)
 {
-    return "unknown";
+    return "#85-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep 18 15:26:59 UTC 2025";
 }
 
 static const char *uname_arch(void)
 {
-#if defined(CONFIG_IDF_TARGET_ARCH)
-    return CONFIG_IDF_TARGET_ARCH;
-#elif defined(__XTENSA__)
-    return "xtensa";
-#elif defined(__riscv) || defined(__riscv__)
-    return "riscv";
-#else
-    return "unknown";
-#endif
+    return "x86_64";
 }
 
 static const char *uname_machine(void)
@@ -116,6 +109,16 @@ static const char *uname_processor(void)
     return uname_arch();
 }
 
+static const char *uname_hardware_platform(void)
+{
+    return uname_arch();
+}
+
+static const char *uname_operating_system(void)
+{
+    return "GNU/Linux";
+}
+
 static void select_all(uname_opts_t *opts)
 {
     opts->sysname = true;
@@ -123,17 +126,20 @@ static void select_all(uname_opts_t *opts)
     opts->release = true;
     opts->version = true;
     opts->machine = true;
+    opts->processor = true;
+    opts->hardware_platform = true;
+    opts->operating_system = true;
 }
 
 static bool any_selected(const uname_opts_t *opts)
 {
     return opts->sysname || opts->nodename || opts->release || opts->version || opts->machine
-           || opts->processor;
+           || opts->processor || opts->hardware_platform || opts->operating_system;
 }
 
 static int uname_print(const uname_opts_t *opts)
 {
-    const char *fields[8];
+    const char *fields[10];
     int n = 0;
 
     if (opts->sysname) {
@@ -153,6 +159,12 @@ static int uname_print(const uname_opts_t *opts)
     }
     if (opts->processor) {
         fields[n++] = uname_processor();
+    }
+    if (opts->hardware_platform) {
+        fields[n++] = uname_hardware_platform();
+    }
+    if (opts->operating_system) {
+        fields[n++] = uname_operating_system();
     }
 
     for (int i = 0; i < n; ++i) {
@@ -180,7 +192,7 @@ int main(int argc, char **argv)
 
     int opt;
     opterr = 0;
-    while ((opt = getopt(argc, argv, "amnprsv")) != -1) {
+    while ((opt = getopt(argc, argv, "amnprsvio")) != -1) {
         switch (opt) {
         case 'a':
             select_all(&opts);
@@ -203,16 +215,22 @@ int main(int argc, char **argv)
         case 'p':
             opts.processor = true;
             break;
+        case 'i':
+            opts.hardware_platform = true;
+            break;
+        case 'o':
+            opts.operating_system = true;
+            break;
         default:
             eprintf("uname: illegal option -- %c\n", optopt);
-            eprintf("usage: uname [-amnprsv]\n");
+            eprintf("usage: uname [-amnprsvio]\n");
             return 1;
         }
     }
 
     if (optind < argc) {
         eprintf("uname: extra operand: %s\n", argv[optind] ? argv[optind] : "");
-        eprintf("usage: uname [-amnprsv]\n");
+        eprintf("usage: uname [-amnprsvio]\n");
         return 1;
     }
 
