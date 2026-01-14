@@ -8,3 +8,7 @@ codex.sh
 .codex
 memory.md
 esp-idf
+original-bsd-master
+legacyelf
+bin_riscv_esp32p4.zip
+.venv-idf
