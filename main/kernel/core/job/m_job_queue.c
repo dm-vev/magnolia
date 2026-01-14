@@ -6,12 +6,16 @@
 #include <string.h>
 
 #include "sdkconfig.h"
+#include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "kernel/core/job/m_job_queue.h"
 #include "kernel/core/job/m_job_worker.h"
 #include "kernel/core/job/m_job_core.h"
 #include "kernel/core/timer/m_timer.h"
 #include "kernel/core/sched/m_sched.h"
+
+static const char *TAG = "m_job_queue";
 
 /**
  * @brief   Append a worker to the waiter list while holding the queue lock.
@@ -292,16 +296,22 @@ m_job_queue_t *m_job_queue_create(const m_job_queue_config_t *config)
 {
     if (config == NULL || config->capacity == 0 || config->worker_count == 0
         || config->name == NULL) {
+        ESP_LOGE(TAG, "create: invalid config");
         return NULL;
     }
 
     if (config->capacity > CONFIG_MAGNOLIA_JOB_QUEUE_CAPACITY_MAX
         || config->worker_count > CONFIG_MAGNOLIA_JOB_QUEUE_WORKER_COUNT_MAX) {
+        ESP_LOGE(TAG,
+                 "create: config exceeds limits cap=%u workers=%u",
+                 (unsigned)config->capacity,
+                 (unsigned)config->worker_count);
         return NULL;
     }
 
     m_job_queue_t *queue = pvPortMalloc(sizeof(*queue));
     if (queue == NULL) {
+        ESP_LOGE(TAG, "create: no memory for queue struct");
         return NULL;
     }
     memset(queue, 0, sizeof(*queue));
@@ -314,6 +324,8 @@ m_job_queue_t *m_job_queue_create(const m_job_queue_config_t *config)
 
     queue->ring = pvPortMalloc(sizeof(m_job_handle_t *) * queue->capacity);
     if (queue->ring == NULL) {
+        ESP_LOGE(TAG, "create: no memory for ring (cap=%u)",
+                 (unsigned)queue->capacity);
         vPortFree(queue);
         return NULL;
     }
@@ -321,6 +333,8 @@ m_job_queue_t *m_job_queue_create(const m_job_queue_config_t *config)
     queue->workers =
             pvPortMalloc(sizeof(m_job_worker_t) * queue->worker_count);
     if (queue->workers == NULL) {
+        ESP_LOGE(TAG, "create: no memory for workers (count=%u)",
+                 (unsigned)queue->worker_count);
         vPortFree(queue->ring);
         vPortFree(queue);
         return NULL;
@@ -328,6 +342,7 @@ m_job_queue_t *m_job_queue_create(const m_job_queue_config_t *config)
 
     queue->lock = xSemaphoreCreateMutexStatic(&queue->lock_storage);
     if (queue->lock == NULL) {
+        ESP_LOGE(TAG, "create: mutex create failed");
         vPortFree(queue->workers);
         vPortFree(queue->ring);
         vPortFree(queue);
@@ -359,6 +374,13 @@ m_job_queue_t *m_job_queue_create(const m_job_queue_config_t *config)
             .user_data = queue,
         };
         if (m_sched_task_create(&opts, &worker->task_id) != M_SCHED_OK) {
+            ESP_LOGE(TAG,
+                     "create: worker task create failed name=%s stack=%u prio=%u free_int=%u largest_int=%u",
+                     queue->name,
+                     (unsigned)config->stack_depth,
+                     (unsigned)config->priority,
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
             for (size_t j = 0; j < i; ++j) {
                 m_sched_task_destroy(queue->workers[j].task_id);
             }

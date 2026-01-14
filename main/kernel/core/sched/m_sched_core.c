@@ -8,6 +8,10 @@
 
 #include <string.h>
 
+#include "sdkconfig.h"
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+
 #include "kernel/core/sched/m_sched_core.h"
 #include "kernel/core/sched/m_sched_core_internal.h"
 #include "kernel/core/sched/m_sched_worker.h"
@@ -188,9 +192,18 @@ m_sched_error_t m_sched_task_create(const m_sched_task_options_t *options,
         return M_SCHED_ERR_INVALID_PARAM;
     }
 
-    size_t stack_depth = options->stack_depth
-                         ? options->stack_depth
-                         : configMINIMAL_STACK_SIZE;
+    /*
+     * Magnolia task APIs treat stack_depth as a byte count (matching Kconfig),
+     * while ESP-IDF FreeRTOS xTaskCreate expects a depth in StackType_t words.
+     */
+    size_t stack_depth_bytes = options->stack_depth
+                               ? options->stack_depth
+                               : (configMINIMAL_STACK_SIZE * sizeof(StackType_t));
+    size_t stack_depth_words =
+            (stack_depth_bytes + sizeof(StackType_t) - 1) / sizeof(StackType_t);
+    if (stack_depth_words < configMINIMAL_STACK_SIZE) {
+        stack_depth_words = configMINIMAL_STACK_SIZE;
+    }
     UBaseType_t priority = options->priority ? options->priority
                                              : (tskIDLE_PRIORITY + 1u);
 
@@ -243,7 +256,7 @@ m_sched_error_t m_sched_task_create(const m_sched_task_options_t *options,
 #if CONFIG_FREERTOS_SMP
         created = xTaskCreatePinnedToCore(m_sched_task_wrapper,
                                           meta->name,
-                                          stack_depth,
+                                          stack_depth_words,
                                           entry,
                                           priority,
                                           &created_handle,
@@ -252,13 +265,20 @@ m_sched_error_t m_sched_task_create(const m_sched_task_options_t *options,
     } else {
         created = xTaskCreate(m_sched_task_wrapper,
                               meta->name,
-                              stack_depth,
+                              stack_depth_words,
                               entry,
                               priority,
                               &created_handle);
     }
 
     if (created != pdPASS) {
+        ESP_LOGE("m_sched",
+                 "task create failed name=%s stack_bytes=%u stack_words=%u free_int=%u largest_int=%u",
+                 options->name,
+                 (unsigned)stack_depth_bytes,
+                 (unsigned)stack_depth_words,
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
         m_sched_metadata_finalize(meta);
         vPortFree(entry);
         return M_SCHED_ERR_NO_MEMORY;

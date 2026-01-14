@@ -45,7 +45,7 @@ static bool run_test_create_destroy(void)
         .name = "sched_spawn",
         .entry = sched_worker_lifecycle,
         .argument = done,
-        .stack_depth = configMINIMAL_STACK_SIZE,
+        .stack_depth = configMINIMAL_STACK_SIZE * sizeof(StackType_t),
         .priority = (tskIDLE_PRIORITY + 1),
         .cpu_affinity = M_SCHED_CPU_AFFINITY_ANY,
     };
@@ -82,7 +82,7 @@ static bool run_test_destroy_waiting(void)
         .name = "sched_wait",
         .entry = sched_blocking_worker,
         .argument = trigger,
-        .stack_depth = configMINIMAL_STACK_SIZE,
+        .stack_depth = configMINIMAL_STACK_SIZE * sizeof(StackType_t),
         .priority = (tskIDLE_PRIORITY + 1),
         .cpu_affinity = M_SCHED_CPU_AFFINITY_ANY,
     };
@@ -115,7 +115,7 @@ static bool run_test_metadata_snapshot(void)
         .name = "sched_meta",
         .entry = sched_worker_lifecycle,
         .argument = NULL,
-        .stack_depth = configMINIMAL_STACK_SIZE,
+        .stack_depth = configMINIMAL_STACK_SIZE * sizeof(StackType_t),
         .priority = (tskIDLE_PRIORITY + 1),
         .tag = tag,
         .user_data = &marker,

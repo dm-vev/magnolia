@@ -70,6 +70,10 @@ static m_job_handler_result_t magnolia_init_job(m_job_id_t job, void *data)
         }
         int rc = 0;
         int ret = m_elf_run_file(path, 1, argv, &rc);
+        if (ret == 0 && rc == 0) {
+            ESP_LOGI(TAG, "init exited ret=%d rc=%d, stopping", ret, rc);
+            break;
+        }
         ESP_LOGW(TAG, "init exited ret=%d rc=%d, restarting", ret, rc);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -93,9 +97,18 @@ static void magnolia_autostart_init(void)
     cfg.worker_count = 1;
     cfg.stack_depth = CONFIG_MAGNOLIA_ELF_INIT_STACK_DEPTH;
 
+    ESP_LOGI(TAG,
+             "autostart init: stack_depth=%u free_int=%u largest_int=%u",
+             (unsigned)cfg.stack_depth,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+
     s_init_queue = m_job_queue_create(&cfg);
     if (s_init_queue == NULL) {
-        ESP_LOGE(TAG, "init queue create failed");
+        ESP_LOGE(TAG,
+                 "init queue create failed free_int=%u largest_int=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
         return;
     }
 

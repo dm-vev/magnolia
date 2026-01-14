@@ -124,7 +124,7 @@ static bool run_test_blocking_wait(void)
         .name = "ipc_sig_wait",
         .entry = ipc_signal_wait_worker,
         .argument = &ctx,
-        .stack_depth = configMINIMAL_STACK_SIZE,
+        .stack_depth = configMINIMAL_STACK_SIZE * sizeof(StackType_t),
         .priority = (tskIDLE_PRIORITY + 2),
         .cpu_affinity = M_SCHED_CPU_AFFINITY_ANY,
     };
@@ -192,7 +192,7 @@ static bool run_test_destroy_wakes_waiters(void)
         .name = "ipc_sig_wait",
         .entry = ipc_signal_wait_worker,
         .argument = &ctx,
-        .stack_depth = configMINIMAL_STACK_SIZE,
+        .stack_depth = configMINIMAL_STACK_SIZE * sizeof(StackType_t),
         .priority = (tskIDLE_PRIORITY + 2),
         .cpu_affinity = M_SCHED_CPU_AFFINITY_ANY,
     };

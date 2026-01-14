@@ -165,7 +165,7 @@ static bool run_test_blocking_behavior(void)
         .name = "ipc_chan_send",
         .entry = ipc_channel_send_worker,
         .argument = &send_ctx,
-        .stack_depth = configMINIMAL_STACK_SIZE,
+        .stack_depth = configMINIMAL_STACK_SIZE * sizeof(StackType_t),
         .priority = (tskIDLE_PRIORITY + 2),
         .cpu_affinity = M_SCHED_CPU_AFFINITY_ANY,
     };
@@ -214,7 +214,7 @@ static bool run_test_blocking_behavior(void)
         .name = "ipc_chan_recv",
         .entry = ipc_channel_recv_worker,
         .argument = &recv_ctx,
-        .stack_depth = configMINIMAL_STACK_SIZE,
+        .stack_depth = configMINIMAL_STACK_SIZE * sizeof(StackType_t),
         .priority = (tskIDLE_PRIORITY + 2),
         .cpu_affinity = M_SCHED_CPU_AFFINITY_ANY,
     };
@@ -318,7 +318,7 @@ static bool run_test_destroy_wakes_waiters(void)
         .name = "cd_send",
         .entry = ipc_channel_send_worker,
         .argument = &send_ctx,
-        .stack_depth = configMINIMAL_STACK_SIZE,
+        .stack_depth = configMINIMAL_STACK_SIZE * sizeof(StackType_t),
         .priority = (tskIDLE_PRIORITY + 2),
         .cpu_affinity = M_SCHED_CPU_AFFINITY_ANY,
     };
@@ -358,7 +358,7 @@ static bool run_test_destroy_wakes_waiters(void)
         .name = "cd_recv",
         .entry = ipc_channel_recv_worker,
         .argument = &recv_ctx,
-        .stack_depth = configMINIMAL_STACK_SIZE,
+        .stack_depth = configMINIMAL_STACK_SIZE * sizeof(StackType_t),
         .priority = (tskIDLE_PRIORITY + 2),
         .cpu_affinity = M_SCHED_CPU_AFFINITY_ANY,
     };

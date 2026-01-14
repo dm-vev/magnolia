@@ -239,14 +239,14 @@ static bool run_test_multiple_waiters_order(void)
 
     m_sched_task_id_t worker_ids[2];
     for (int i = 0; i < 2; i++) {
-        m_sched_task_options_t opts = {
-            .name = (i == 0) ? "ipc_evt_wait_a" : "ipc_evt_wait_b",
-            .entry = ipc_event_flags_wait_worker,
-            .argument = &ctx[i],
-            .stack_depth = configMINIMAL_STACK_SIZE,
-            .priority = (tskIDLE_PRIORITY + 2),
-            .cpu_affinity = M_SCHED_CPU_AFFINITY_ANY,
-        };
+	        m_sched_task_options_t opts = {
+	            .name = (i == 0) ? "ipc_evt_wait_a" : "ipc_evt_wait_b",
+	            .entry = ipc_event_flags_wait_worker,
+	            .argument = &ctx[i],
+	            .stack_depth = configMINIMAL_STACK_SIZE * sizeof(StackType_t),
+	            .priority = (tskIDLE_PRIORITY + 2),
+	            .cpu_affinity = M_SCHED_CPU_AFFINITY_ANY,
+	        };
         if (m_sched_task_create(&opts, &worker_ids[i]) != M_SCHED_OK) {
             ipc_event_flags_destroy(handle);
             vQueueDelete(order_queue);
@@ -305,7 +305,7 @@ static bool run_test_clear_no_wake(void)
         .name = "ipc_evt_clear",
         .entry = ipc_event_flags_wait_worker,
         .argument = &ctx,
-        .stack_depth = configMINIMAL_STACK_SIZE,
+        .stack_depth = configMINIMAL_STACK_SIZE * sizeof(StackType_t),
         .priority = (tskIDLE_PRIORITY + 2),
         .cpu_affinity = M_SCHED_CPU_AFFINITY_ANY,
     };
@@ -374,7 +374,7 @@ static bool run_test_blocking_wait(void)
         .name = "ipc_evt_block",
         .entry = ipc_event_flags_wait_worker,
         .argument = &ctx,
-        .stack_depth = configMINIMAL_STACK_SIZE,
+        .stack_depth = configMINIMAL_STACK_SIZE * sizeof(StackType_t),
         .priority = (tskIDLE_PRIORITY + 2),
         .cpu_affinity = M_SCHED_CPU_AFFINITY_ANY,
     };
@@ -440,7 +440,7 @@ static bool run_test_timed_wait_ready(void)
         .name = "ipc_evt_timed",
         .entry = ipc_event_flags_wait_worker,
         .argument = &ctx,
-        .stack_depth = configMINIMAL_STACK_SIZE,
+        .stack_depth = configMINIMAL_STACK_SIZE * sizeof(StackType_t),
         .priority = (tskIDLE_PRIORITY + 2),
         .cpu_affinity = M_SCHED_CPU_AFFINITY_ANY,
     };
@@ -488,7 +488,7 @@ static bool run_test_destroy_wakes_waiters(void)
         .name = "ipc_evt_dest",
         .entry = ipc_event_flags_wait_worker,
         .argument = &ctx,
-        .stack_depth = configMINIMAL_STACK_SIZE,
+        .stack_depth = configMINIMAL_STACK_SIZE * sizeof(StackType_t),
         .priority = (tskIDLE_PRIORITY + 2),
         .cpu_affinity = M_SCHED_CPU_AFFINITY_ANY,
     };
