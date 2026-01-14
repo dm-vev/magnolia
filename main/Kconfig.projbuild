@@ -6,15 +6,15 @@ menu "MagnoliaOS Configuration"
         help
             Приоритет корневого процесса в системе.
 
-source "$srctree/main/kernel/core/sched/Kconfig.sched"
-source "$srctree/main/kernel/core/timer/Kconfig.timer"
-source "$srctree/main/kernel/core/memory/Kconfig.memory"
-source "$srctree/main/kernel/core/net/Kconfig.net"
+source "$IDF_PATH/../main/kernel/core/sched/Kconfig.sched"
+source "$IDF_PATH/../main/kernel/core/timer/Kconfig.timer"
+source "$IDF_PATH/../main/kernel/core/memory/Kconfig.memory"
+source "$IDF_PATH/../main/kernel/core/net/Kconfig.net"
 
-source "$srctree/main/kernel/core/elf/Kconfig.elf"
-source "$srctree/main/kernel/core/job/Kconfig.job"
-source "$srctree/main/kernel/core/vfs/Kconfig.vfs"
-source "$srctree/main/kernel/vfs/fs/devfs/Kconfig.devfs"
-source "$srctree/main/kernel/core/ipc/Kconfig.ipc_root"
+source "$IDF_PATH/../main/kernel/core/elf/Kconfig.elf"
+source "$IDF_PATH/../main/kernel/core/job/Kconfig.job"
+source "$IDF_PATH/../main/kernel/core/vfs/Kconfig.vfs"
+source "$IDF_PATH/../main/kernel/vfs/fs/devfs/Kconfig.devfs"
+source "$IDF_PATH/../main/kernel/core/ipc/Kconfig.ipc_root"
 
 endmenu
