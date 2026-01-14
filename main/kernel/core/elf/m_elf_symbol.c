@@ -22,11 +22,13 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <ctype.h>
+#include <locale.h>
 #include <setjmp.h>
 #include <math.h>
 #include <termios.h>
 #include <time.h>
 #include "esp_log.h"
+#include "esp_partition.h"
 
 #include "kernel/core/elf/m_elf_app_api.h"
 #include "kernel/core/elf/m_elf_loader.h"
@@ -46,6 +48,64 @@ extern char **environ;
 /* libgcc helpers often referenced by TinyGo/Zig/Rust applets. */
 extern int __unorddf2(double x, double y);
 extern int __gtdf2(double x, double y);
+extern void __udivdi3(void);
+extern void __umoddi3(void);
+extern void __divdf3(void);
+extern void __muldf3(void);
+extern void __subdf3(void);
+extern void __eqdf2(void);
+extern void __nedf2(void);
+extern void __gedf2(void);
+extern void __ledf2(void);
+extern void __ltdf2(void);
+extern void __extendsfdf2(void);
+extern void __fixunsdfsi(void);
+extern void __floatundidf(void);
+extern void __floatunsidf(void);
+extern void __extenddftf2(void);
+extern void __fixdfdi(void);
+extern void __fixdfsi(void);
+extern void __floatdidf(void);
+extern void __divdi3(void);
+
+extern char *strsep(char **stringp, const char *delim);
+
+/* lwIP/pthread compatibility: some applets refer to these symbols directly. */
+extern int lwip_socket(int domain, int type, int protocol);
+extern int lwip_connect(int s, const struct sockaddr *name, socklen_t namelen);
+extern int lwip_setsockopt(int s, int level, int optname, const void *optval, socklen_t optlen);
+extern ssize_t lwip_send(int s, const void *data, size_t size, int flags);
+extern ssize_t lwip_recv(int s, void *mem, size_t len, int flags);
+extern ssize_t lwip_sendto(int s,
+                           const void *dataptr,
+                           size_t size,
+                           int flags,
+                           const struct sockaddr *to,
+                           socklen_t tolen);
+extern ssize_t lwip_recvfrom(int s,
+                             void *mem,
+                             size_t len,
+                             int flags,
+                             struct sockaddr *from,
+                             socklen_t *fromlen);
+extern int lwip_inet_pton(int af, const char *src, void *dst);
+
+extern int pthread_create(void *thread, const void *attr, void *(*start_routine)(void *), void *arg);
+extern int pthread_join(void *thread, void **retval);
+
+/* xv6 userland compatibility hooks for /bin/user */
+extern int xv6_chdir(const char *path);
+extern int xv6_close(int fd);
+extern int xv6_dup(int fd);
+extern int xv6_exec(const char *path, char **argv);
+extern void xv6_exit(int code);
+extern int xv6_fork(void);
+extern int xv6_open(const char *path, int flags, ...);
+extern int xv6_pipe(int fds[2]);
+extern ssize_t xv6_read(int fd, void *buf, size_t n);
+extern void *xv6_sys_sbrk(int n, int kind);
+extern int xv6_wait(int *status);
+extern ssize_t xv6_write(int fd, const void *buf, size_t n);
 
 struct dyn_m_elfsym {
     const char *name;
@@ -132,10 +192,15 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     { "poll", (void *)m_libc_poll },
     { "select", (void *)m_libc_select },
     { "unlink", (void *)m_libc_unlink },
+    { "rmdir", (void *)m_libc_rmdir },
     { "mkdir", (void *)m_libc_mkdir },
+    { "chmod", (void *)m_libc_chmod },
     { "chdir", (void *)m_libc_chdir },
     { "getcwd", (void *)m_libc_getcwd },
+    { "realpath", (void *)m_libc_realpath },
+    { "readlink", (void *)m_libc_readlink },
     { "rename", (void *)m_libc_rename },
+    { "utime", (void *)m_libc_utime },
     { "stat", (void *)m_libc_stat },
     { "fstat", (void *)m_libc_fstat },
     { "opendir", (void *)m_libc_opendir },
@@ -146,6 +211,8 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     { "access", (void *)m_libc_access },
     { "remove", (void *)m_libc_remove },
     { "link", (void *)link },
+    { "linkat", (void *)m_libc_linkat },
+    { "symlink", (void *)m_libc_symlink },
 
     /* Time (monotonic-backed) */
     { "clock_gettime", (void *)m_libc_clock_gettime },
@@ -168,6 +235,7 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     { "fork", (void *)m_libc_fork },
     { "wait", (void *)m_libc_wait },
     { "signal", (void *)m_libc_signal },
+    { "kill", (void *)m_libc_kill },
     { "sbrk", (void *)m_libc_sbrk },
 
     /* Memory/string primitives */
@@ -193,6 +261,7 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     M_ELFSYM_EXPORT(strpbrk),
     M_ELFSYM_EXPORT(strtok),
     M_ELFSYM_EXPORT(strtok_r),
+    M_ELFSYM_EXPORT(strsep),
     M_ELFSYM_EXPORT(strncasecmp),
     M_ELFSYM_EXPORT(strtol),
     M_ELFSYM_EXPORT(strtoul),
@@ -214,6 +283,7 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     M_ELFSYM_EXPORT(vprintf),
     M_ELFSYM_EXPORT(puts),
     M_ELFSYM_EXPORT(putchar),
+    M_ELFSYM_EXPORT(ferror),
 
 #if CONFIG_MAGNOLIA_ELF_EXPORT_NEWLIB
     /* newlib syscall ABI (used by FILE* and friends) */
@@ -317,16 +387,21 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     M_ELFSYM_EXPORT(tolower),
     M_ELFSYM_EXPORT(toupper),
 
+    /* locale */
+    M_ELFSYM_EXPORT(setlocale),
+
     /* time helpers */
     M_ELFSYM_EXPORT(gmtime),
     M_ELFSYM_EXPORT(localtime),
     M_ELFSYM_EXPORT(mktime),
+    M_ELFSYM_EXPORT(difftime),
     M_ELFSYM_EXPORT(strftime),
 
     /* libm (common subset) */
     M_ELFSYM_EXPORT(fabs),
     M_ELFSYM_EXPORT(floor),
     M_ELFSYM_EXPORT(ceil),
+    M_ELFSYM_EXPORT(modf),
     M_ELFSYM_EXPORT(sqrt),
     M_ELFSYM_EXPORT(pow),
     M_ELFSYM_EXPORT(sin),
@@ -336,6 +411,23 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     /* libgcc floating-point compare helpers (ROM-backed on ESP chips) */
     M_ELFSYM_EXPORT(__unorddf2),
     M_ELFSYM_EXPORT(__gtdf2),
+    M_ELFSYM_EXPORT(__udivdi3),
+    M_ELFSYM_EXPORT(__umoddi3),
+    M_ELFSYM_EXPORT(__divdf3),
+    M_ELFSYM_EXPORT(__muldf3),
+    M_ELFSYM_EXPORT(__subdf3),
+    M_ELFSYM_EXPORT(__eqdf2),
+    M_ELFSYM_EXPORT(__nedf2),
+    M_ELFSYM_EXPORT(__gedf2),
+    M_ELFSYM_EXPORT(__ledf2),
+    M_ELFSYM_EXPORT(__ltdf2),
+    M_ELFSYM_EXPORT(__extendsfdf2),
+    M_ELFSYM_EXPORT(__fixunsdfsi),
+    M_ELFSYM_EXPORT(__floatundidf),
+    M_ELFSYM_EXPORT(__floatunsidf),
+
+    /* ESP-IDF convenience APIs used by some applets */
+    M_ELFSYM_EXPORT(esp_partition_find_first),
 
     /* stdlib helpers commonly used by small tools */
     M_ELFSYM_EXPORT(qsort),
@@ -367,6 +459,32 @@ static const struct m_elfsym g_kernel_libc_syms[] = {
     M_ELFSYM_EXPORT(m_sysctl_get),
     M_ELFSYM_EXPORT(m_sysctl_set),
     M_ELFSYM_EXPORT(m_sysctl_list),
+
+    /* lwIP/pthread symbol names (header macros may refer to them directly) */
+    M_ELFSYM_EXPORT(lwip_socket),
+    M_ELFSYM_EXPORT(lwip_connect),
+    M_ELFSYM_EXPORT(lwip_setsockopt),
+    M_ELFSYM_EXPORT(lwip_send),
+    M_ELFSYM_EXPORT(lwip_recv),
+    M_ELFSYM_EXPORT(lwip_sendto),
+    M_ELFSYM_EXPORT(lwip_recvfrom),
+    M_ELFSYM_EXPORT(lwip_inet_pton),
+    M_ELFSYM_EXPORT(pthread_create),
+    M_ELFSYM_EXPORT(pthread_join),
+
+    /* xv6 /bin/user compatibility symbols */
+    M_ELFSYM_EXPORT(xv6_chdir),
+    M_ELFSYM_EXPORT(xv6_close),
+    M_ELFSYM_EXPORT(xv6_dup),
+    M_ELFSYM_EXPORT(xv6_exec),
+    M_ELFSYM_EXPORT(xv6_exit),
+    M_ELFSYM_EXPORT(xv6_fork),
+    M_ELFSYM_EXPORT(xv6_open),
+    M_ELFSYM_EXPORT(xv6_pipe),
+    M_ELFSYM_EXPORT(xv6_read),
+    M_ELFSYM_EXPORT(xv6_sys_sbrk),
+    M_ELFSYM_EXPORT(xv6_wait),
+    M_ELFSYM_EXPORT(xv6_write),
 
     /* Magnolia ELF exec helpers (used by /bin/sh and friends) */
     { "m_elf_run_file", (void *)m_elf_run_file },

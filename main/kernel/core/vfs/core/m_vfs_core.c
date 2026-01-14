@@ -1103,6 +1103,46 @@ m_vfs_unlink(m_job_id_t job,
 }
 
 m_vfs_error_t
+m_vfs_rmdir(m_job_id_t job,
+            const char *path)
+{
+    if (path == NULL) {
+        return _m_vfs_record_result(M_VFS_ERR_INVALID_PARAM);
+    }
+
+    if (_m_vfs_should_inject(NULL)) {
+        return _m_vfs_record_result(M_VFS_ERR_BUSY);
+    }
+
+    m_vfs_path_t parsed;
+    m_vfs_error_t err = _m_vfs_parse_user_path(job, path, &parsed);
+    if (err != M_VFS_ERR_OK) {
+        return _m_vfs_record_result(err);
+    }
+
+    m_vfs_node_t *parent = NULL;
+    char leaf[M_VFS_NAME_MAX_LEN];
+    err = _m_vfs_resolve_parent(job,
+                                &parsed,
+                                &parent,
+                                leaf,
+                                sizeof(leaf));
+    if (err != M_VFS_ERR_OK) {
+        return _m_vfs_record_result(err);
+    }
+
+    if (parent->fs_type == NULL || parent->fs_type->ops == NULL ||
+            parent->fs_type->ops->rmdir == NULL) {
+        m_vfs_node_release(parent);
+        return _m_vfs_record_result(M_VFS_ERR_NOT_SUPPORTED);
+    }
+
+    err = parent->fs_type->ops->rmdir(parent->mount, parent, leaf);
+    m_vfs_node_release(parent);
+    return _m_vfs_record_result(err);
+}
+
+m_vfs_error_t
 m_vfs_mkdir(m_job_id_t job,
             const char *path,
             uint32_t mode)

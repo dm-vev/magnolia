@@ -224,6 +224,22 @@ static int m_elf_validate_ehdr(const elf32_hdr_t *ehdr, size_t len)
         return -EINVAL;
     }
 
+#if defined(__XTENSA__)
+#define M_ELF_EXPECT_MACHINE 94u /* EM_XTENSA */
+#elif defined(__riscv)
+#define M_ELF_EXPECT_MACHINE 243u /* EM_RISCV */
+#else
+#define M_ELF_EXPECT_MACHINE 0u
+#endif
+
+    if (M_ELF_EXPECT_MACHINE != 0u && (unsigned)ehdr->machine != M_ELF_EXPECT_MACHINE) {
+        ESP_LOGE(TAG,
+                 "Unsupported ELF machine=%u (expected %u)",
+                 (unsigned)ehdr->machine,
+                 (unsigned)M_ELF_EXPECT_MACHINE);
+        return -ENOTSUP;
+    }
+
     if (ehdr->phnum > 0) {
         if (ehdr->phentsize != sizeof(elf32_phdr_t)) {
             ESP_LOGE(TAG, "Invalid phentsize=%u", (unsigned)ehdr->phentsize);

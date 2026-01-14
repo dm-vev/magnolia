@@ -96,6 +96,8 @@ m_vfs_error_t m_vfs_close(m_job_id_t job,
                           int fd);
 m_vfs_error_t m_vfs_unlink(m_job_id_t job,
                             const char *path);
+m_vfs_error_t m_vfs_rmdir(m_job_id_t job,
+                           const char *path);
 m_vfs_error_t m_vfs_mkdir(m_job_id_t job,
                            const char *path,
                            uint32_t mode);

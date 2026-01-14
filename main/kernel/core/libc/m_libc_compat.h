@@ -97,7 +97,11 @@ void *m_libc_realloc(void *ptr, size_t size);
 void m_libc_free(void *ptr);
 
 int m_libc_unlink(const char *path);
+int m_libc_rmdir(const char *path);
 int m_libc_mkdir(const char *path, mode_t mode);
+int m_libc_chmod(const char *path, mode_t mode);
+int m_libc_linkat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, int flags);
+int m_libc_symlink(const char *target, const char *linkpath);
 int m_libc_chdir(const char *path);
 char *m_libc_getcwd(char *buffer, size_t size);
 int m_libc_rename(const char *old, const char *newpath);
@@ -127,10 +131,15 @@ unsigned int m_libc_alarm(unsigned int seconds);
 int m_libc_pause(void);
 typedef void (*m_libc_sighandler_t)(int);
 m_libc_sighandler_t m_libc_signal(int signum, m_libc_sighandler_t handler);
+int m_libc_kill(int pid, int sig);
 int m_libc_pipe(int fds[2]);
 int m_libc_fork(void);
 int m_libc_wait(int *status);
 void *m_libc_sbrk(ptrdiff_t incr);
+
+char *m_libc_realpath(const char *path, char *resolved_path);
+ssize_t m_libc_readlink(const char *path, char *buf, size_t bufsz);
+int m_libc_utime(const char *filename, const void *times);
 
 #if defined(CONFIG_MAGNOLIA_ELF_EXPORT_NEWLIB) && CONFIG_MAGNOLIA_ELF_EXPORT_NEWLIB
 void *m_libc_malloc_r(struct _reent *r, size_t size);

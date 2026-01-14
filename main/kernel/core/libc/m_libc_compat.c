@@ -30,7 +30,11 @@
 #include "freertos/task.h"
 
 #include "kernel/arch/m_arch.h"
+#include "kernel/core/elf/m_elf_loader.h"
 #include "kernel/core/job/jctx.h"
+#include "kernel/core/job/m_job_core.h"
+#include "kernel/core/job/m_job_queue.h"
+#include "kernel/core/job/m_job_wait.h"
 #include "kernel/core/memory/m_alloc.h"
 #include "kernel/core/timer/m_timer_deadline.h"
 #include "kernel/core/timer/m_timer_core.h"
@@ -108,8 +112,13 @@ static bool libc_ptr_in_range(const void *ptr, size_t size, uintptr_t low, uintp
 
 static bool libc_ptr_writable_range(const void *ptr, size_t size)
 {
-    return libc_ptr_in_range(ptr, size, SOC_DRAM_LOW, SOC_DRAM_HIGH) ||
-           libc_ptr_in_range(ptr, size, SOC_EXTRAM_LOW, SOC_EXTRAM_HIGH);
+    bool ok = libc_ptr_in_range(ptr, size, SOC_DRAM_LOW, SOC_DRAM_HIGH);
+#if defined(SOC_EXTRAM_LOW) && defined(SOC_EXTRAM_HIGH)
+    ok = ok || libc_ptr_in_range(ptr, size, SOC_EXTRAM_LOW, SOC_EXTRAM_HIGH);
+#elif defined(SOC_EXTRAM_DATA_LOW) && defined(SOC_EXTRAM_DATA_HIGH)
+    ok = ok || libc_ptr_in_range(ptr, size, SOC_EXTRAM_DATA_LOW, SOC_EXTRAM_DATA_HIGH);
+#endif
+    return ok;
 }
 
 static bool libc_ptr_readable_range(const void *ptr, size_t size)
@@ -510,6 +519,32 @@ static ssize_t libc_console_write(const void *buffer, size_t size)
     }
 
     const uint8_t *bytes = (const uint8_t *)buffer;
+
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    if (!xPortInIsrContext() && usb_serial_jtag_is_driver_installed()) {
+        size_t written = 0;
+        while (written < size) {
+            uint8_t c = bytes[written];
+            if (c == '\n') {
+                const char crlf[2] = {'\r', '\n'};
+                int n = usb_serial_jtag_write_bytes(crlf, sizeof(crlf), portMAX_DELAY);
+                if (n <= 0) {
+                    break;
+                }
+                written++;
+                continue;
+            }
+
+            int n = usb_serial_jtag_write_bytes(&c, 1, portMAX_DELAY);
+            if (n <= 0) {
+                break;
+            }
+            written++;
+        }
+        return (ssize_t)written;
+    }
+#endif
+
     for (size_t i = 0; i < size; ++i) {
         char c = (char)bytes[i];
         if (c == '\n') {
@@ -1707,6 +1742,20 @@ int m_libc_unlink(const char *path)
     return 0;
 }
 
+int m_libc_rmdir(const char *path)
+{
+    if (path == NULL) {
+        libc_set_errno(EINVAL);
+        return -1;
+    }
+    m_vfs_error_t err = m_vfs_rmdir(libc_job_id(), path);
+    if (err != M_VFS_ERR_OK) {
+        libc_set_errno(libc_errno_from_vfs_error(err));
+        return -1;
+    }
+    return 0;
+}
+
 int m_libc_mkdir(const char *path, mode_t mode)
 {
     (void)mode;
@@ -1720,6 +1769,115 @@ int m_libc_mkdir(const char *path, mode_t mode)
         return -1;
     }
     return 0;
+}
+
+int m_libc_chmod(const char *path, mode_t mode)
+{
+    if (path == NULL) {
+        libc_set_errno(EINVAL);
+        return -1;
+    }
+    if (!libc_ptr_readable_range(path, 1)) {
+        libc_set_errno(EFAULT);
+        return -1;
+    }
+
+    char normalized[M_VFS_PATH_MAX_LEN];
+    if (!libc_build_absolute_path(path, normalized, sizeof(normalized))) {
+        libc_set_errno(EINVAL);
+        return -1;
+    }
+
+    m_vfs_path_t parsed;
+    if (!m_vfs_path_parse(normalized, &parsed)) {
+        libc_set_errno(EINVAL);
+        return -1;
+    }
+
+    m_vfs_node_t *node = NULL;
+    m_vfs_error_t err = m_vfs_path_resolve(libc_job_id(), &parsed, &node);
+    if (err != M_VFS_ERR_OK || node == NULL) {
+        libc_set_errno(libc_errno_from_vfs_error(err));
+        return -1;
+    }
+
+    const m_vfs_fs_type_t *fs_type = node->fs_type;
+    const struct m_vfs_fs_ops *ops = (fs_type != NULL) ? fs_type->ops : NULL;
+    if (ops == NULL || ops->getattr == NULL || ops->setattr == NULL) {
+        m_vfs_node_release(node);
+        libc_set_errno(ENOTSUP);
+        return -1;
+    }
+
+    m_vfs_stat_t st = {0};
+    err = ops->getattr(node, &st);
+    if (err == M_VFS_ERR_OK) {
+        st.mode = (uint32_t)mode;
+        err = ops->setattr(node, &st);
+    }
+    m_vfs_node_release(node);
+
+    if (err != M_VFS_ERR_OK) {
+        libc_set_errno(libc_errno_from_vfs_error(err));
+        return -1;
+    }
+    return 0;
+}
+
+int m_libc_linkat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, int flags)
+{
+    (void)flags;
+    if (oldpath == NULL || newpath == NULL) {
+        libc_set_errno(EINVAL);
+        return -1;
+    }
+#if defined(AT_FDCWD)
+    if (olddirfd != AT_FDCWD || newdirfd != AT_FDCWD) {
+        libc_set_errno(ENOTSUP);
+        return -1;
+    }
+#else
+    (void)olddirfd;
+    (void)newdirfd;
+    libc_set_errno(ENOTSUP);
+    return -1;
+#endif
+
+    /* Hardlink support is filesystem-dependent; fall back to link() when available. */
+    return link(oldpath, newpath);
+}
+
+int m_libc_symlink(const char *target, const char *linkpath)
+{
+    (void)target;
+    (void)linkpath;
+    libc_set_errno(ENOTSUP);
+    return -1;
+}
+
+char *m_libc_realpath(const char *path, char *resolved_path)
+{
+    (void)path;
+    (void)resolved_path;
+    libc_set_errno(ENOSYS);
+    return NULL;
+}
+
+ssize_t m_libc_readlink(const char *path, char *buf, size_t bufsz)
+{
+    (void)path;
+    (void)buf;
+    (void)bufsz;
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
+int m_libc_utime(const char *filename, const void *times)
+{
+    (void)filename;
+    (void)times;
+    libc_set_errno(ENOSYS);
+    return -1;
 }
 
 int m_libc_chdir(const char *path)
@@ -2160,6 +2318,14 @@ m_libc_sighandler_t m_libc_signal(int signum, m_libc_sighandler_t handler)
     return SIG_ERR;
 }
 
+int m_libc_kill(int pid, int sig)
+{
+    (void)pid;
+    (void)sig;
+    libc_set_errno(ENOSYS);
+    return -1;
+}
+
 int m_libc_pipe(int fds[2])
 {
     (void)fds;
@@ -2450,7 +2616,256 @@ int m_libc_link_r(struct _reent *r, const char *old, const char *newpath)
 
 int m_libc_rmdir_r(struct _reent *r, const char *path)
 {
-    (void)path;
-    libc_reent_set_errno(r, ENOSYS);
+    if (path == NULL) {
+        libc_reent_set_errno(r, EINVAL);
+        return -1;
+    }
+    m_vfs_error_t err = m_vfs_rmdir(libc_job_id(), path);
+    if (err != M_VFS_ERR_OK) {
+        libc_reent_set_errno(r, libc_errno_from_vfs_error(err));
+        return -1;
+    }
+    return 0;
+}
+
+/* ---- ABI stubs and compatibility shims for ELF applets ---- */
+
+/*
+ * Some ESP-IDF headers map POSIX names like socket/connect/send/recv/inet_pton
+ * to their lwIP-prefixed counterparts. When Magnolia networking is disabled,
+ * provide stubs so ELF applets still load and fail with ENOSYS at runtime.
+ *
+ * Mark these weak so a real lwIP build can override them.
+ */
+__attribute__((weak)) int lwip_socket(int domain, int type, int protocol)
+{
+    return m_libc_socket(domain, type, protocol);
+}
+
+__attribute__((weak)) int lwip_connect(int s, const struct sockaddr *name, socklen_t namelen)
+{
+    return m_libc_connect(s, name, namelen);
+}
+
+__attribute__((weak)) int lwip_setsockopt(int s, int level, int optname, const void *optval, socklen_t optlen)
+{
+    return m_libc_setsockopt(s, level, optname, optval, optlen);
+}
+
+__attribute__((weak)) ssize_t lwip_send(int s, const void *data, size_t size, int flags)
+{
+    return m_libc_send(s, data, size, flags);
+}
+
+__attribute__((weak)) ssize_t lwip_recv(int s, void *mem, size_t len, int flags)
+{
+    return m_libc_recv(s, mem, len, flags);
+}
+
+__attribute__((weak)) ssize_t lwip_sendto(int s,
+                                          const void *dataptr,
+                                          size_t size,
+                                          int flags,
+                                          const struct sockaddr *to,
+                                          socklen_t tolen)
+{
+    return m_libc_sendto(s, dataptr, size, flags, to, tolen);
+}
+
+__attribute__((weak)) ssize_t lwip_recvfrom(int s,
+                                            void *mem,
+                                            size_t len,
+                                            int flags,
+                                            struct sockaddr *from,
+                                            socklen_t *fromlen)
+{
+    return m_libc_recvfrom(s, mem, len, flags, from, fromlen);
+}
+
+__attribute__((weak)) int lwip_inet_pton(int af, const char *src, void *dst)
+{
+    (void)af;
+    (void)src;
+    (void)dst;
+    libc_set_errno(ENOSYS);
     return -1;
+}
+
+/*
+ * pthread is an optional ESP-IDF component; nettest pulls it in, but many
+ * Magnolia configs do not. Provide weak stubs so applets still load.
+ */
+#if defined(__has_include)
+#if __has_include(<pthread.h>)
+#include <pthread.h>
+__attribute__((weak)) int pthread_create(pthread_t *thread,
+                                         const pthread_attr_t *attr,
+                                         void *(*start_routine)(void *),
+                                         void *arg)
+{
+    (void)thread;
+    (void)attr;
+    (void)start_routine;
+    (void)arg;
+    libc_set_errno(ENOSYS);
+    return ENOSYS;
+}
+
+__attribute__((weak)) int pthread_join(pthread_t thread, void **retval)
+{
+    (void)thread;
+    (void)retval;
+    libc_set_errno(ENOSYS);
+    return ENOSYS;
+}
+#endif
+#endif
+
+/*
+ * Job control is optional; /bin/rcd expects these symbols. Provide weak stubs
+ * so applets load even when CONFIG_MAGNOLIA_JOB_ENABLED is off.
+ */
+#if !defined(CONFIG_MAGNOLIA_JOB_ENABLED) || !CONFIG_MAGNOLIA_JOB_ENABLED
+__attribute__((weak)) m_job_queue_t *m_job_queue_create(const m_job_queue_config_t *config)
+{
+    (void)config;
+    return NULL;
+}
+
+__attribute__((weak)) m_job_error_t m_job_queue_destroy(m_job_queue_t *queue)
+{
+    (void)queue;
+    return M_JOB_ERR_STATE;
+}
+
+__attribute__((weak)) m_job_error_t m_job_queue_submit_with_handle(m_job_queue_t *queue,
+                                                                   m_job_handler_t handler,
+                                                                   void *data,
+                                                                   m_job_handle_t **out_handle)
+{
+    (void)queue;
+    (void)handler;
+    (void)data;
+    if (out_handle != NULL) {
+        *out_handle = NULL;
+    }
+    return M_JOB_ERR_STATE;
+}
+
+__attribute__((weak)) m_job_error_t m_job_cancel(m_job_id_t job)
+{
+    (void)job;
+    return M_JOB_ERR_STATE;
+}
+
+__attribute__((weak)) m_job_error_t m_job_handle_destroy(m_job_id_t job)
+{
+    (void)job;
+    return M_JOB_ERR_STATE;
+}
+
+__attribute__((weak)) m_job_future_wait_result_t m_job_try_wait_for_job(m_job_id_t job,
+                                                                        m_job_result_descriptor_t *result)
+{
+    (void)job;
+    if (result != NULL) {
+        memset(result, 0, sizeof(*result));
+        result->status = M_JOB_RESULT_ERROR;
+    }
+    return M_JOB_FUTURE_WAIT_SHUTDOWN;
+}
+#endif
+
+/*
+ * xv6 userland compatibility: provide the syscall-like entry points expected
+ * by the xv6-derived /bin/user applet.
+ */
+int xv6_chdir(const char *path)
+{
+    return m_libc_chdir(path);
+}
+
+int xv6_close(int fd)
+{
+    return m_libc_close(fd);
+}
+
+int xv6_dup(int fd)
+{
+    return m_libc_dup(fd);
+}
+
+int xv6_exec(const char *path, char **argv)
+{
+    if (path == NULL) {
+        libc_set_errno(EINVAL);
+        return -1;
+    }
+    int argc = 0;
+    if (argv != NULL) {
+        while (argv[argc] != NULL && argc < 64) {
+            ++argc;
+        }
+    }
+
+    int rc = 0;
+    int ret = m_elf_run_file(path, argc, argv, &rc);
+    if (ret == 0) {
+        m_libc_exit(rc);
+    }
+    return -1;
+}
+
+int xv6_fork(void)
+{
+    return m_libc_fork();
+}
+
+int xv6_open(const char *path, int flags, ...)
+{
+    if (path == NULL) {
+        libc_set_errno(EINVAL);
+        return -1;
+    }
+
+    if ((flags & O_CREAT) != 0) {
+        va_list ap;
+        va_start(ap, flags);
+        int mode = va_arg(ap, int);
+        va_end(ap);
+        return m_libc_open(path, flags, mode);
+    }
+    return m_libc_open(path, flags);
+}
+
+int xv6_pipe(int fds[2])
+{
+    return m_libc_pipe(fds);
+}
+
+ssize_t xv6_read(int fd, void *buf, size_t n)
+{
+    return m_libc_read(fd, buf, n);
+}
+
+void *xv6_sys_sbrk(int n, int kind)
+{
+    (void)kind;
+    return m_libc_sbrk((ptrdiff_t)n);
+}
+
+int xv6_wait(int *status)
+{
+    return m_libc_wait(status);
+}
+
+ssize_t xv6_write(int fd, const void *buf, size_t n)
+{
+    return m_libc_write(fd, buf, n);
+}
+
+void xv6_exit(int code)
+{
+    m_libc_exit(code);
+    __builtin_unreachable();
 }
