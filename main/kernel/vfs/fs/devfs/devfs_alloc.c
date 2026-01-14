@@ -205,11 +205,29 @@ static m_vfs_error_t devfs_alloc_write(void *private_data,
     size_t consumed = 0;
     while (consumed < size) {
         char ch = input[consumed++];
+        char line_copy[sizeof(device->line)];
+        size_t line_len = 0;
+        bool flush = false;
+
+        /*
+         * Protect the shared line buffer from concurrent writers. Previously
+         * multiple tasks could race on line_len/line contents, which is a
+         * data race and could corrupt the parsed limit. We only hold the
+         * critical section long enough to snapshot and reset the buffer.
+         */
+        portENTER_CRITICAL(&device->lock);
         if (ch == '\n' || device->line_len + 1 >= sizeof(device->line)) {
-            size_t line_len = device->line_len;
-            device->line[device->line_len] = '\0';
+            line_len = device->line_len;
+            if (line_len > 0) {
+                memcpy(line_copy, device->line, line_len);
+            }
             device->line_len = 0;
-            m_vfs_error_t err = devfs_alloc_apply_line(device, device->line, line_len);
+            flush = true;
+        }
+        portEXIT_CRITICAL(&device->lock);
+
+        if (flush) {
+            m_vfs_error_t err = devfs_alloc_apply_line(device, line_copy, line_len);
             if (err != M_VFS_ERR_OK) {
                 return err;
             }
@@ -217,7 +235,27 @@ static m_vfs_error_t devfs_alloc_write(void *private_data,
                 continue;
             }
         }
-        device->line[device->line_len++] = ch;
+
+        for (;;) {
+            /* If another writer filled the buffer, flush it before appending. */
+            portENTER_CRITICAL(&device->lock);
+            if (device->line_len + 1 < sizeof(device->line)) {
+                device->line[device->line_len++] = ch;
+                portEXIT_CRITICAL(&device->lock);
+                break;
+            }
+            line_len = device->line_len;
+            if (line_len > 0) {
+                memcpy(line_copy, device->line, line_len);
+            }
+            device->line_len = 0;
+            portEXIT_CRITICAL(&device->lock);
+
+            m_vfs_error_t err = devfs_alloc_apply_line(device, line_copy, line_len);
+            if (err != M_VFS_ERR_OK) {
+                return err;
+            }
+        }
     }
 
     *written = size;
