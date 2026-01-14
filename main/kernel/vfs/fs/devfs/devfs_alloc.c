@@ -1,6 +1,7 @@
 #include "kernel/vfs/fs/devfs/devfs_alloc.h"
 
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -56,7 +57,15 @@ static bool parse_limit_bytes(const char *buf, size_t len, size_t *out_bytes)
     size_t idx = 0;
     while (idx < len && isdigit((unsigned char)buf[idx])) {
         size_t digit = (size_t)(buf[idx] - '0');
-        value = value * 10 + digit;
+        /*
+         * The input comes from userspace, so an oversized value could wrap
+         * size_t during decimal accumulation and silently lower the limit.
+         * Reject overflows to keep the limit deterministic and safe.
+         */
+        if (value > (SIZE_MAX - digit) / 10U) {
+            return false;
+        }
+        value = value * 10U + digit;
         idx++;
     }
     if (idx == 0) {
@@ -68,6 +77,10 @@ static bool parse_limit_bytes(const char *buf, size_t len, size_t *out_bytes)
             return false;
         }
         size_t total = heap_caps_get_total_size(MALLOC_CAP_DEFAULT);
+        /* Avoid overflow before percent math to prevent wraparound limits. */
+        if (value != 0 && total > SIZE_MAX / value) {
+            return false;
+        }
         *out_bytes = (total * value) / 100U;
         return true;
     }
@@ -94,6 +107,10 @@ static bool parse_limit_bytes(const char *buf, size_t len, size_t *out_bytes)
         return false;
     }
 
+    /* Reject suffix multiplication overflow instead of wrapping. */
+    if (mult != 0 && value > SIZE_MAX / mult) {
+        return false;
+    }
     *out_bytes = value * mult;
     return true;
 }
