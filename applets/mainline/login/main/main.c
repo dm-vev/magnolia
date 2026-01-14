@@ -2,6 +2,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <stdbool.h>
 
 int m_elf_run_file(const char *path, int argc, char *argv[], int *out_rc);
 
@@ -44,7 +45,7 @@ static ssize_t console_getline(char *buf, size_t cap)
             continue;
         }
 
-        if ((unsigned char)c < 0x20 || (unsigned char)c > 0x7e) {
+        if ((unsigned char)c < 0x20) {
             continue;
         }
 

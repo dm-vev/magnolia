@@ -44,6 +44,8 @@ mainline/ps
 mainline/printenv
 mainline/printf
 mainline/paste
+mainline/rcctl
+mainline/rcd
 mainline/pwd
 mainline/rm
 mainline/rmdir

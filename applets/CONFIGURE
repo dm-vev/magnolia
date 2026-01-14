@@ -29,6 +29,8 @@ ps
 printenv
 printf
 paste
+rcctl
+rcd
 sh
 shell
 sort
